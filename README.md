@@ -11,7 +11,7 @@ Typical tournament flow:
 - TO closes registration with /close.
 - TO generates first-round pairings using /pair.
 - Players can check their pairing with /pairing and standings with /standings.
-- Players report match results with /report
+- Players report match results with /report.
 - TO uses /pair after all rounds have been reported to pair the next round.
 - TO can use /missing_results to check which players haven't reported and /report_other to submit match reports for players.
 - TO uses /end to end the tournament and report final standings.

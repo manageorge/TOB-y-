@@ -42,9 +42,13 @@ Only available in testing servers:
 - Make messages ephemeral where appropriate to limit bot spam in tournament channels
 - /migrate: (TO) move a tournament from one channel to another
 - Option to create pairings upon using /close
-- Code errors send message to public testing server
+- Code errors send message to private testing server
 - /tournament_status: (TO) view settings and status for the channel's tournament
 - TO tools to view and modify a player's registration, reporting, and swaps
 - TO tools to change round's pairings
 - Dynamic tournament points
+- Support for single and double elimination tournaments
+- Change setup modals to default to existing settings
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
+- Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be actually useful, but I think it'll be interesting at least)
+- Automate deck duplication and swaps processes

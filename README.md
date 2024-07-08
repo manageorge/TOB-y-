@@ -47,6 +47,7 @@ Only available in testing servers:
 - TO tools to view and modify a player's registration, reporting, and swaps
 - TO tools to change round's pairings
 - Dynamic tournament points
+- Better discord message character limit fix (weblink)
 - Support for single and double elimination tournaments
 - Change setup modals to default to existing settings
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)

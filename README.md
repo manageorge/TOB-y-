@@ -34,7 +34,7 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
-- Discord message character limit fix
+- Discord message character limit fix (implemented in next version)
 - /standings and /end output include player record
 - /topcut: (TO) pair single-elimination rounds for top N players
 - /feedback: send feedback message to public testing server

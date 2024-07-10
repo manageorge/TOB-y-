@@ -35,7 +35,7 @@ Only available in testing servers:
 
 # Features Coming Soon
 - Discord message character limit fix (implemented in next version)
-- /standings and /end output include player record
+- /standings and /end output include player record (implemented in next version)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - /feedback: send feedback message to public testing server
 - /undrop: (TO) add a dropped player back to the tournament

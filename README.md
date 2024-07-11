@@ -40,7 +40,7 @@ Only available in testing servers:
 - /feedback: send feedback message to public testing server (implemented in next version)
 - ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
 - Make messages ephemeral where appropriate to limit bot spam in tournament channels
-- Make TO override commands ping
+- Make TO override commands ping (implemented in next version)
 - /migrate: (TO) move a tournament from one channel to another
 - Option to create pairings upon using /close
 - Code errors send message to private testing server

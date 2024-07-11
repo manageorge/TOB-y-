@@ -38,7 +38,7 @@ Only available in testing servers:
 - /standings and /end output include player record (implemented in next version)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - /feedback: send feedback message to public testing server (implemented in next version)
-- /undrop: (TO) add a dropped player back to the tournament
+- ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
 - Make messages ephemeral where appropriate to limit bot spam in tournament channels
 - Make TO override commands ping
 - /migrate: (TO) move a tournament from one channel to another

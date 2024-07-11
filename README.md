@@ -37,7 +37,7 @@ Only available in testing servers:
 - Discord message character limit fix (implemented in next version)
 - /standings and /end output include player record (implemented in next version)
 - /topcut: (TO) pair single-elimination rounds for top N players
-- /feedback: send feedback message to public testing server
+- /feedback: send feedback message to public testing server (implemented in next version)
 - /undrop: (TO) add a dropped player back to the tournament
 - Make messages ephemeral where appropriate to limit bot spam in tournament channels
 - Make TO override commands ping

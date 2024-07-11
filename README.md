@@ -48,9 +48,9 @@ Only available in testing servers:
 - TO tools to view and modify a player's registration, reporting, and swaps
 - TO tools to change round's pairings
 - Dynamic tournament points
-- Better discord message character limit fix (weblink)
+- ~~Better discord message character limit fix (weblink)~~ (current fix seems fine for expected tournament size, this may be useful in the future though)
 - Support for single and double elimination tournaments
 - Change setup modals to default to existing settings
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
-- Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be actually useful, but I think it'll be interesting at least)
+- Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be *actually useful*, but I think it'll be interesting at least)
 - Automate deck duplication and swaps processes

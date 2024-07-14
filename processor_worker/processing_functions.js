@@ -108,11 +108,11 @@ export async function pair(input) {
           } else if (round_wins == round_losses) {
             //player tied match
             var new_m_record = player_m_record + 1;
-            await env.DB.prepare('UPDATE players SET wins = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['draws'] + 1, player, tournament_id).run();
+            await env.DB.prepare('UPDATE players SET draws = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['draws'] + 1, player, tournament_id).run();
           } else {
             //if player lost match
             var new_m_record = player_m_record;
-            await env.DB.prepare('UPDATE players SET wins = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['losses'] + 1, player, tournament_id).run();
+            await env.DB.prepare('UPDATE players SET losses = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['losses'] + 1, player, tournament_id).run();
           }
           var new_mwp = (new_m_record / (played_dict[player].length * 3)).toFixed(4);
           var new_gwp = (new_g_record / (played_dict[player].length * 3)).toFixed(4);

@@ -3,48 +3,6 @@
  * and registration.
  */
 
-export const TOBY_COMMAND = {
-  name: 'toby',
-  description: 'Access TO Bot (TOBy) commands. Use "/toby help" for a list of commands.',
-  options: [
-  {
-    'name': 'function',
-    'description': 'Desired TOBy function',
-    'type': 3,
-    'required': true,
-  },
-  {
-    'name': 'inputs',
-    'description': 'Inputs to send the TOBy function',
-    'type': 3,
-    'required': false,
-  }]
-};
-
-export const TOBYTO_COMMAND = {
-  name: 'tobyto',
-  description: 'Access TO Bot (TOBy) TO commands. Use "/tobyto help" for a list of commands.',
-  options: [
-  {
-    'name': 'function',
-    'description': 'Desired TOBy TO function',
-    'type': 3,
-    'required': true,
-  },
-  {
-    'name': 'user',
-    'description': 'Targeted user',
-    'type': 9,
-    'required': true,
-  },
-  {
-    'name': 'inputs',
-    'description': 'Inputs to send the TOBy TO function',
-    'type': 3,
-    'required': false,
-  }]
-};
-
 export const PAIR_COMMAND = {
   name: 'pair',
   description: '(TO) Pairs a new round if conditions met, else reports current pairings',
@@ -215,4 +173,21 @@ export const DROP_OTHER_COMMAND = {
     'required': true,
   }
   ]
+};
+
+export const FEEDBACK_COMMAND = {
+  name: 'feedback',
+  description: 'Send feedback',
+};
+
+export const MIGRATE_COMMAND = {
+  name: 'migrate',
+  description: '(TO) Move tournament to another channel',
+  options: [
+  {
+    'name': 'target_channel',
+    'description': 'Channel to migrate to',
+    'type': 7,
+    'required': true,
+  }]
 };

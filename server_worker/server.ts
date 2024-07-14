@@ -25,7 +25,9 @@ import {
   AUTOREPORT_COMMAND,
   REPORT_OTHER_COMMAND,
   REGISTER_OTHER_COMMAND,
-  DROP_OTHER_COMMAND
+  DROP_OTHER_COMMAND,
+  FEEDBACK_COMMAND,
+  MIGRATE_COMMAND
 } from './commands.js';
 import {
   SingleElimination,
@@ -79,7 +81,7 @@ router.post('/', async (request, env) => {
     //handles the submission of modal forms
     //setup commonly used variables
     var tournament_id = interaction.guild_id + interaction.channel_id;
-    var RETURN_FLAGS = '';
+    var RETURN_FLAGS = InteractionResponseFlags.EPHEMERAL;
     var RETURN_MENTIONS = [];
     var RETURN_CONTENT = 'No return content set by function.'
     var RETURN_TYPE = InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE;
@@ -139,7 +141,7 @@ router.post('/', async (request, env) => {
           //temp_to check
           var temp_to_fetch = await env.DB.prepare('SELECT target_id FROM temp_to WHERE to_id = ? AND tournament_id = ? AND command = ? ORDER BY ROWID DESC LIMIT 1').bind(interaction.member.user.id, tournament_id, 'register_other').all();
           if (temp_to_fetch['results'].length == 0) {
-            var RETURN_CONTENT = 'Error: No data recorded in temp_to.'
+            var RETURN_CONTENT = 'Error: No data recorded in temp_to.';
             break;
           }
           await ack_and_queue(interaction, env);
@@ -167,7 +169,7 @@ router.post('/', async (request, env) => {
           var drop_conf_1 = interaction.data['components'][0]['components'][0]['value'];
           var drop_conf_2 = interaction.data['components'][1]['components'][0]['value'];
           if (drop_conf_1.toLowerCase() != 'drop' || drop_conf_2.toLowerCase() != 'drop') {
-            var RETURN_CONTENT = 'Error: Drop confirmation failed. Both fields must match "drop" (without quotes).'
+            var RETURN_CONTENT = 'Error: Drop confirmation failed. Both fields must match "drop" (without quotes).';
             break;
           }
           await ack_and_queue(interaction, env);
@@ -194,7 +196,7 @@ router.post('/', async (request, env) => {
           //temp_to check
           var temp_to_fetch = await env.DB.prepare('SELECT target_id FROM temp_to WHERE to_id = ? AND tournament_id = ? AND command = ? ORDER BY ROWID DESC LIMIT 1').bind(interaction.member.user.id, tournament_id, 'drop_other').all();
           if (temp_to_fetch['results'].length == 0) {
-            var RETURN_CONTENT = 'Error: No data recorded in temp_to.'
+            var RETURN_CONTENT = 'Error: No data recorded in temp_to.';
             break;
           }
           await ack_and_queue(interaction, env);
@@ -231,7 +233,7 @@ router.post('/', async (request, env) => {
           var end_conf_1 = interaction.data['components'][0]['components'][0]['value'];
           var end_conf_2 = interaction.data['components'][1]['components'][0]['value'];
           if (end_conf_1.toLowerCase() != 'end' || end_conf_2.toLowerCase() != 'end') {
-            var RETURN_CONTENT = 'Error: End confirmation failed. Both fields must match "end" (without quotes).'
+            var RETURN_CONTENT = 'Error: End confirmation failed. Both fields must match "end" (without quotes).';
             break;
           }
           await ack_and_queue(interaction, env);
@@ -244,6 +246,15 @@ router.post('/', async (request, env) => {
       case 'slash_swaps_modal': {
         try {
           //all error checking for slash_swaps_modal occurs in processing_function process_swaps_modal
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /setup_swaps modal processing.';
+          break;
+        }
+      }
+      case 'slash_feedback_modal': {
+        try {
           await ack_and_queue(interaction, env);
         } catch (error) {
           console.log(error)
@@ -274,7 +285,7 @@ router.post('/', async (request, env) => {
     var insufficientPermissions = 'Error: Admin commands can only be called by users with a TO role.';
     var RETURN_CONTENT = 'No message set by function.';
     var RETURN_TYPE = InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE;
-    var RETURN_FLAGS = '';
+    var RETURN_FLAGS = InteractionResponseFlags.EPHEMERAL;
     var RETURN_MENTIONS = [];
     var tournament_id = interaction.guild_id + interaction.channel_id;
     switch (interaction.data.name.toLowerCase()) {
@@ -491,7 +502,7 @@ router.post('/', async (request, env) => {
           //check for existing pairings
           var pairings_fetch = await env.DB.prepare('SELECT player_one, player_two FROM pairings WHERE tournament_id = ?').bind(tournament_id).all();
           if (pairings_fetch['results'].length == 0) {
-            var RETURN_CONTENT = 'Error: No pairings (yet). TO, use "/toby pair" to generate pairings.';
+            var RETURN_CONTENT = 'Error: No pairings found.';
             break;
           } 
           var target_id = interaction.member.user.id;
@@ -591,9 +602,9 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = insufficientPermissions;
             break;
           }
-          //check if request is in Rodeo discord or my testing discords
+          //check if request is in testing discords
           var is_test_guild = false;
-          var test_guilds = [<TESTING_GUILD_IDS>];
+          var test_guilds = [<TEST_GUILD_IDS>];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -652,8 +663,9 @@ router.post('/', async (request, env) => {
       }
       case SWAPS_COMMAND.name.toLowerCase(): {
         try {
+          //check if request is in testing discords
           var is_test_guild = false;
-          var test_guilds = [<TESTING_GUILD_IDS>];
+          var test_guilds = [<TEST_GUILD_IDS>];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -776,9 +788,9 @@ router.post('/', async (request, env) => {
       }
       case AUTOFILL_COMMAND.name.toLowerCase(): {
         try{
-          //check if request is in my testing discords
+          //check if request is in testing discords
           var is_test_guild = false;
-          var test_guilds = [<TESTING_GUILD_IDS>];
+          var test_guilds = [<TEST_GUILD_IDS>];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -813,7 +825,7 @@ router.post('/', async (request, env) => {
         try{
           //check if request is in testing discords
           var is_test_guild = false;
-          var test_guilds = [<TESTING_GUILD_IDS>];
+          var test_guilds = [<TEST_GUILD_IDS>];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -990,6 +1002,61 @@ router.post('/', async (request, env) => {
         } catch (error) {
           console.log(error)
           var RETURN_CONTENT = 'Error occured in /register_other intake.';
+          break;
+        }
+      }
+      case FEEDBACK_COMMAND.name.toLowerCase(): {
+        try {
+          //build feedback modal
+          var RETURN_TYPE = InteractionResponseType.MODAL;
+          var RETURN_CUSTOM_ID = 'slash_feedback_modal';
+          var RETURN_TITLE = 'Send feedback';
+          var RETURN_COMPONENTS = [
+          {
+            type: 1,
+            components: [{
+              type: 4,
+              custom_id: 'modal_feedback_message',
+              style: 2,
+              label: 'Message:',
+              min_length: 1,
+              max_length: 4000,
+              value: 'Message may be made publicly viewable',
+            }]
+          },
+          ];
+          break;
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /feedback intake.';
+          break;
+        }
+      }
+      case MIGRATE_COMMAND.name.toLowerCase(): {
+        try{
+          //TO check
+          var isTO = await to_check(interaction, env);
+          if (!isTO) {
+            var RETURN_CONTENT = insufficientPermissions;
+            break;
+          }
+          //ongoing tournament check
+          var ongoing_tournaments_fetch = await env.DB.prepare("SELECT * FROM ongoing_tournaments WHERE id = ?").bind(tournament_id).all();
+          if (ongoing_tournaments_fetch['results'].length == 0) {
+            var RETURN_CONTENT = 'Error: No ongoing tournament in this channel.';
+            break;
+          }
+          //check for tournament in target channel
+          var new_tournament_id = interaction.guild_id + interaction.data.options[0]['value'];
+          var target_channel_fetch = await env.DB.prepare('SELECT * FROM ongoing_tournaments WHERE id = ?').bind(interaction.guild_id + interaction.data.options[0]['value']).all();
+          if (target_channel_fetch['results'].length != 0) {
+            var RETURN_CONTENT = 'Error: Tournament already exists in target channel.';
+            break;
+          }
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error);
+          var RETURN_CONTENT = 'Error occured in /migrate intake.';
           break;
         }
       }

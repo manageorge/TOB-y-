@@ -23,7 +23,10 @@ import {
   process_setup_swaps_modal,
   process_end_modal,
   process_swaps_modal,
-  temp_to_check
+  temp_to_check,
+  send_output,
+  process_feedback_modal,
+  migrate
 } from './processing_functions.js'
 
 export default {
@@ -31,214 +34,231 @@ export default {
     return new Response('Hello World!');
   },
   async queue(batch, env): Promise<void> {
-    let messages = JSON.stringify(batch.messages);
-    let parsed = JSON.parse(messages);
-    let interaction = parsed[0]['body'];
-    let edit_url = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${interaction.token}/messages/@original`;
+    var messages = JSON.stringify(batch.messages);
+    var parsed = JSON.parse(messages);
+    var interaction = parsed[0]['body'];
+    var edit_url = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${interaction.token}/messages/@original`;
     if (interaction.type === InteractionType.APPLICATION_COMMAND) {
       switch (interaction.data.name.toLowerCase()) {
         case 'open': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await open(input);
-          console.log(output)
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await open(input);
           break;
         }
         case 'close': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await close(input);
-          console.log(output)
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await close(input);
           break;
         }
         case 'pair': {
-          let input = {
+          var input = {
             'env': env,
             'tournament_id': interaction.guild_id + interaction.channel_id
           };
-          let output = await pair(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var mentions = ['users'];
+          var output = await pair(input);
           break;
         }
         case 'pairing': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await pairing(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await pairing(input);
           break;
         }
         case 'report': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await report(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await report(input);
           break;
         }
         case 'missing_results': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await missing_results(input);
+          var output = await missing_results(input);
           var mentions = [];
           //set user ping
           if (interaction.data.options && interaction.data.options[0]['value'].toLowerCase() == 'y') {
             mentions = ['users'];
           }
-          let res = await axios.patch(edit_url, {content: output, allowed_mentions: {parse: mentions}});
           break;
         }
         case 'standings': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await standings(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await standings(input);
           break;
         }
         case 'reopen': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await reopen(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await reopen(input);
           break;
         }
         case 'autofill': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await autofill(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await autofill(input);
           break;
         }
         case 'autoreport': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           };
-          let output = await autoreport(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var output = await autoreport(input);
           break;
         }
         case 'report_other': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction,
             'target': interaction.data.options[0]['value']
           };
-          let output = await report(input);
-          let res = await axios.patch(edit_url, {content: output});
+          var mentions = ['users'];
+          var output = await report(input);
+          break;
+        }
+        case 'migrate': {
+          var input = {
+            'env': env,
+            'interaction': interaction
+          }
+          var output = await migrate(input);
           break;
         }
         default:
-          let res = await axios.patch(edit_url, {content: `Error: Unrecognized command "${interaction.data.name.toLowerCase()}"`});
+          var output = `Error: Unrecognized command "${interaction.data.name.toLowerCase()}"`;
       }
+      var send = {
+        message: output,
+        edit_url: edit_url,
+        interaction: interaction,
+        env: env
+      }
+      if (mentions) {
+        send.mentions = mentions;
+      }
+      await send_output(send);
     }
     if (interaction.type === InteractionType.MODAL_SUBMIT) {
       switch (interaction.data.custom_id.toLowerCase()) {
         case 'slash_set_defaults_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_defaults_modal(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_defaults_modal(input);
           break;
         }
         case 'slash_register_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_register_modals(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_register_modals(input);
           break;
         }
         case 'slash_register_other_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction,
             'command': 'register_other'
           }
-          //saving below commented lines for use in slash_register_other_modal
           input.target = await temp_to_check(input);
           if (input.target == 'Error') {
-            let res = await axios.patch(edit_url, {content: 'An error occured in temp_to_check function.'});
+            var output = 'An error occured in temp_to_check function.';
             break;
           }
-          let output = await process_register_modals(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var mentions = ['users'];
+          var output = await process_register_modals(input);
           break;
         }
         case 'slash_drop_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_drop_modals(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_drop_modals(input);
           break;
         }
         case 'slash_drop_other_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction,
             'command': 'drop_other'
           }
-          //saving below commented lines for use in slash_register_other_modal
           input.target = await temp_to_check(input);
           if (input.target == 'Error') {
-            let res = await axios.patch(edit_url, {content: 'An error occured in temp_to_check function.'});
+            var output = 'An error occured in temp_to_check function.';
             break;
           }
-          let output = await process_drop_modals(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var mentions = ['users'];
+          var output = await process_drop_modals(input);
           break;
         }
         case 'slash_setup_swaps_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_setup_swaps_modal(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_setup_swaps_modal(input);
           break;
         }
         case 'slash_end_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_end_modal(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_end_modal(input);
           break;
         }
         case 'slash_swaps_modal': {
-          let input = {
+          var input = {
             'env': env,
             'interaction': interaction
           }
-          let output = await process_swaps_modal(input);
-          let res = await axios.patch(edit_url, {content: output})
+          var output = await process_swaps_modal(input);
+          break;
+        }
+        case 'slash_feedback_modal': {
+          var input = {
+            'env': env,
+            'interaction': interaction
+          }
+          var output = await process_feedback_modal(input);
           break;
         }
         default:
-          let res = await axios.patch(edit_url, {content: `Error: Unrecognized modal "${interaction.data.custom_id.toLowerCase()}"`});
+          var output = `Error: Unrecognized modal "${interaction.data.custom_id.toLowerCase()}"`;
       }
+      var send = {
+        message: output,
+        edit_url: edit_url,
+        interaction: interaction,
+        env: env
+      }
+      if (mentions) {
+        send.mentions = mentions;
+      }
+      await send_output(send);
     }
   },
 };

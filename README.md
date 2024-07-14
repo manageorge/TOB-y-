@@ -34,12 +34,6 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
-- Discord message character limit fix (implemented in next version)
-- /standings and /end output include player record (implemented in next version)
-- /feedback: send feedback message to public testing server (implemented in next version)
-- Make messages ephemeral where appropriate to limit bot spam in tournament channels (implemented for most errors in next version)
-- Make TO override commands ping (implemented in next version)
-- /migrate: (TO) move a tournament from one channel to another (implemented in next version)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
 - Code errors send message to private testing server

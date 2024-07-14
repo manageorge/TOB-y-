@@ -25,11 +25,13 @@ Other available commands:
 - /drop: player drops from the tournament
 - /drop_other: (TO) drop user from tournament
 - /register_other: (TO) register user for tournament
+- /feedback: send feedback message to public testing server
+- /migrate: (TO) move tournament from current channel to another
 
 Only available in testing servers:
 
 - /setup_swaps: (TO) set default swap settings for the channel (limited to testing and one server due to manual backend processes - this may become publicly available eventually)
-- /swaps: queue swaps for the round (see note to /setup_swaps above)
+- /swaps: submit swaps for the round (see note to /setup_swaps above)
 - /autofill: (TESTING) autofills tournament to set number of players
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
@@ -38,6 +40,7 @@ Only available in testing servers:
 - Option to create pairings upon using /close
 - Code errors send message to private testing server
 - /tournament_status: (TO) view settings and status for the channel's tournament
+- /status: view your tournament details including if you've entered or dropped, overall record, current round record, and current round swaps
 - TO tools to view and modify a player's registration, reporting, and swaps
 - TO tools to change round's pairings
 - Dynamic tournament points

@@ -36,21 +36,21 @@ Only available in testing servers:
 # Features Coming Soon
 - Discord message character limit fix (implemented in next version)
 - /standings and /end output include player record (implemented in next version)
-- /topcut: (TO) pair single-elimination rounds for top N players
 - /feedback: send feedback message to public testing server (implemented in next version)
-- ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
-- Make messages ephemeral where appropriate to limit bot spam in tournament channels
+- Make messages ephemeral where appropriate to limit bot spam in tournament channels (implemented for most errors in next version)
 - Make TO override commands ping (implemented in next version)
-- /migrate: (TO) move a tournament from one channel to another
+- /migrate: (TO) move a tournament from one channel to another (implemented in next version)
+- /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
 - Code errors send message to private testing server
 - /tournament_status: (TO) view settings and status for the channel's tournament
 - TO tools to view and modify a player's registration, reporting, and swaps
 - TO tools to change round's pairings
 - Dynamic tournament points
-- ~~Better discord message character limit fix (weblink)~~ (current fix seems fine for expected tournament size, this may be useful in the future though)
 - Support for single and double elimination tournaments
 - Change setup modals to default to existing settings
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
 - Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be *actually useful*, but I think it'll be interesting at least)
 - Automate deck duplication and swaps processes
+- ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
+- ~~Better discord message character limit fix (weblink)~~ (current fix seems fine for expected tournament size, this may be useful in the future though)

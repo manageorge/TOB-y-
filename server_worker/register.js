@@ -17,7 +17,9 @@ import {
   AUTOREPORT_COMMAND,
   REPORT_OTHER_COMMAND,
   REGISTER_OTHER_COMMAND,
-  DROP_OTHER_COMMAND
+  DROP_OTHER_COMMAND,
+  FEEDBACK_COMMAND,
+  MIGRATE_COMMAND
   } from './commands.js';
 import dotenv from 'dotenv';
 import process from 'node:process';
@@ -73,7 +75,9 @@ const response = await fetch(url, {
     AUTOREPORT_COMMAND,
     REPORT_OTHER_COMMAND,
     REGISTER_OTHER_COMMAND,
-    DROP_OTHER_COMMAND
+    DROP_OTHER_COMMAND,
+    FEEDBACK_COMMAND,
+    MIGRATE_COMMAND
     ]),
 });
 

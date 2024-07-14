@@ -5,6 +5,7 @@ import {
   Stepladder,
   Swiss
 } from 'tournament-pairings';
+import axios from 'axios';
 
 export function reverseString(str) {
   //reverses a string
@@ -47,13 +48,14 @@ export async function pair(input) {
       //record points in players
       if (round > 0) {
         //get players and current score
-        var pre_score_fetch = await env.DB.prepare('SELECT player_id, m_score, mwp, g_score, gwp, played_ids FROM players WHERE tournament_id = ?').bind(tournament_id).all();
+        var pre_score_fetch = await env.DB.prepare('SELECT player_id, m_score, mwp, g_score, gwp, played_ids, wins, losses, draws FROM players WHERE tournament_id = ?').bind(tournament_id).all();
         var pre_score = {};
         var m_records = {};
         var g_records = {};
         var played_dict = {};
         var old_mwp = {};
-        var old_gwp = {};;
+        var old_gwp = {};
+        var records = {};
         for (let i = 0; i < pre_score_fetch['results'].length; i++) {
           if (pre_score_fetch['results'][i]['played_ids'] && pre_score_fetch['results'][i]['played_ids'] != '') {
             var played_ids = pre_score_fetch['results'][i]['played_ids'].split(', ');
@@ -65,6 +67,7 @@ export async function pair(input) {
           g_records[pre_score_fetch['results'][i]['player_id']] = pre_score_fetch['results'][i]['g_score'];
           old_gwp[pre_score_fetch['results'][i]['player_id']] = pre_score_fetch['results'][i]['gwp'];
           played_dict[pre_score_fetch['results'][i]['player_id']] = played_ids;
+          records[pre_score_fetch['results'][i]['player_id']] = {wins: pre_score_fetch['results'][i]['wins'], losses: pre_score_fetch['results'][i]['losses'], draws: pre_score_fetch['results'][i]['draws']}
         }
         //get round results for each player
         var round_results_fetch = await env.DB.prepare('SELECT player_one, record_p1, player_two, record_p2 FROM pairings WHERE tournament_id = ? AND round = ?').bind(tournament_id, round).all();
@@ -101,12 +104,15 @@ export async function pair(input) {
           if (round_wins > round_losses) {
             //player won match
             var new_m_record = player_m_record + 3;
+            await env.DB.prepare('UPDATE players SET wins = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['wins'] + 1, player, tournament_id).run();
           } else if (round_wins == round_losses) {
             //player tied match
             var new_m_record = player_m_record + 1;
+            await env.DB.prepare('UPDATE players SET wins = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['draws'] + 1, player, tournament_id).run();
           } else {
             //if player lost match
             var new_m_record = player_m_record;
+            await env.DB.prepare('UPDATE players SET wins = ? WHERE player_id = ? AND tournament_id = ?').bind(records[player]['losses'] + 1, player, tournament_id).run();
           }
           var new_mwp = (new_m_record / (played_dict[player].length * 3)).toFixed(4);
           var new_gwp = (new_g_record / (played_dict[player].length * 3)).toFixed(4);
@@ -554,7 +560,7 @@ export async function standings(input) {
     }
     var round = ongoing_tournaments_fetch['results'][0]['round'];
     //grab player data
-    var player_data_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, m_score, mwp, g_score, gwp, played_ids FROM players WHERE tournament_id = ? ORDER BY m_score').bind(tournament_id).run();
+    var player_data_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, m_score, mwp, g_score, gwp, played_ids, wins, losses, draws FROM players WHERE tournament_id = ? ORDER BY m_score').bind(tournament_id).run();
     if (player_data_fetch['results'].length == 0) {
       return 'Error: No players have registered for the tournament.';
     }
@@ -575,8 +581,12 @@ export async function standings(input) {
         'mwp': player_data_fetch['results'][i]['mwp'],
         'g_score': player_data_fetch['results'][i]['g_score'],
         'gwp': player_data_fetch['results'][i]['gwp'],
-        'played_ids': played_ids
+        'played_ids': played_ids,
+        'record': player_data_fetch['results'][i]['wins'] + '-' + player_data_fetch['results'][i]['losses']
       };
+      if (player_data_fetch['results'][i]['draws']) {
+        player['record'] = player['record'] + '-' + player_data_fetch['results'][i]['draws'];
+      }
       player_data[player_data_fetch['results'][i]['player_id']] = player;
     }
     //calculate omwp and ogwp, make new player data array for sorting (there has to be a better way to do this)
@@ -591,7 +601,7 @@ export async function standings(input) {
       }
       player_data[player]['omwp'] = cum_omwp / player_data[player]['played_ids'].length;
       player_data[player]['ogwp'] = cum_ogwp / player_data[player]['played_ids'].length;
-      var data = /*player_data[player];*/{
+      var data = {
         'name': player_data[player]['name'],
         'player_id': player_data[player]['player_id'],
         'deck_name': player_data[player]['deck_name'],
@@ -603,6 +613,7 @@ export async function standings(input) {
         'played_ids': player_data[player]['played_ids'],
         'omwp': player_data[player]['omwp'],
         'ogwp': player_data[player]['ogwp'],
+        'record': player_data[player]['record']
       };
       player_array.push(data);
     }
@@ -630,6 +641,7 @@ export async function standings(input) {
       var omwp = player_array[player]['omwp'];
       var g_score = player_array[player]['g_score'];
       var ogwp = player_array[player]['ogwp'];
+      var record = player_array[player]['record'];
       if (m_score < last_m_score) {
         last_m_score = m_score;
         last_omwp = omwp;
@@ -663,9 +675,9 @@ export async function standings(input) {
       }
       if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
         var deck_link = player_array[player]['deck_link'];
-        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} on [${deck_name}](<${deck_link}>)`;
+        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} on [${deck_name}](<${deck_link}>) (${record})`;
       } else {
-        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r}`;
+        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} (${record})`;
       }
     }
     return standings_text;
@@ -1141,7 +1153,7 @@ export async function process_end_modal(input) {
           var w_l_d = round_results[player].split('-');  
         } catch (error) {
           //I can't remember why I needed to put this in and it's definitely not a great way to handle whatever bug I was running into
-          ////to-do: take this out
+          ////to-do: take this out??
           continue;
         }
         var round_wins = Number(w_l_d[0]);
@@ -1258,6 +1270,135 @@ export async function process_swaps_modal(input) {
     var time = new Date();
     var time_string = time.toString();
     await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time_string).run();
+    return RETURN_CONTENT;
+  }
+}
+
+export async function send_output(input) {
+  try {
+    //unpack input
+    var message = input.message;
+    if (input.edit_url) {
+      var edit_url = input.edit_url;  
+    }
+    var interaction = input.interaction;
+    var env = input.env;
+    var mentions = [];
+    if (input.mentions) {
+      mentions = input.mentions;
+    }
+    if (message.length < 2000) {
+      if (edit_url) {
+        let res = await axios.patch(edit_url, {content: message, allowed_mentions: {parse: mentions}});
+        return;
+      }
+      await fetch(`https://discord.com/api/v10/channels/${interaction.channel_id}/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bot ${env.DISCORD_TOKEN}`,
+        },
+        method: 'POST',
+        body: JSON.stringify({
+              content: message, 
+              allowed_mentions: {parse: mentions}
+            })
+      });
+      return;
+    }
+    //cut input at first newline before 2000th character, repeat until length > 2000, send first as a patch and remaining as new message
+    var message_array = [];
+    var i = 0;
+    while (message.length > 2000) {
+      let test_str = message.substr(0, 2000);
+      let index = test_str.lastIndexOf('\n');
+      message_array[i] = test_str.substr(0, index);
+      message = message.substr(index);
+      i++;
+    }
+    message_array[i] = message;
+    var start = 0;
+    if (edit_url) {
+      let res = await axios.patch(edit_url, {content: message_array[0], allowed_mentions: {parse: mentions}});
+      start++;
+    }
+    for (let i = start; i < message.length; i++) {
+      var res_1 = await fetch(`https://discord.com/api/v10/channels/${interaction.channel_id}/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bot ${env.DISCORD_TOKEN}`,
+        },
+        method: 'POST',
+        body: JSON.stringify({
+              content: message_array[i], 
+              allowed_mentions: {parse: mentions}
+            })
+      });
+    }
+    return;
+  } catch (error) {
+    console.log(error);
+    var RETURN_CONTENT = 'Error occured in send_output function.';
+    var time = new Date();
+    await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
+    return RETURN_CONTENT;
+  }
+}
+
+export async function process_feedback_modal(input) {
+  try {
+    //process inputs
+    let env = input.env;
+    let interaction = input.interaction;
+    let tournament_id = interaction.guild_id + interaction.channel_id;
+    //send feedback message to feedback channel
+    await fetch(`https://discord.com/api/v10/channels/<TESTING_CHANNEL_ID>/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bot ${env.DISCORD_TOKEN}`,
+        },
+        method: 'POST',
+        body: JSON.stringify({
+              content: interaction.data['components'][0]['components'][0]['value']
+            })
+      });
+    return `Your feedback was sent, thanks!`;
+  } catch (error) {
+    console.log(error);
+    var RETURN_CONTENT = 'Error occured in reopen function.';
+    var time = new Date();
+    await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
+    return RETURN_CONTENT;
+  }
+}
+
+export async function migrate(input) {
+  try {
+    //process inputs
+    let env = input.env;
+    let interaction = input.interaction;
+    let tournament_id = interaction.guild_id + interaction.channel_id;
+    //change tournament_id in all ongoing_tournaments, players, and pairings
+    var new_tournament_id = interaction.guild_id + interaction.data.options[0]['value'];
+    await env.DB.prepare('UPDATE ongoing_tournaments SET id = ? WHERE id = ?').bind(new_tournament_id, tournament_id).run();
+    await env.DB.prepare('UPDATE players SET tournament_id = ? WHERE tournament_id = ?').bind(new_tournament_id, tournament_id).run();
+    await env.DB.prepare('UPDATE pairings SET tournament_id = ? WHERE tournament_id = ?').bind(new_tournament_id, tournament_id).run();
+    //send message in migrated channel
+    await fetch(`https://discord.com/api/v10/channels/${interaction.data.options[0]['value']}/messages`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bot ${env.DISCORD_TOKEN}`,
+        },
+        method: 'POST',
+        body: JSON.stringify({
+              content: `<@${interaction.member.user.id}> moced a tournament into this channel!`
+            })
+      });
+    return `<@${interaction.member.user.id}> moved tournament to <#${interaction.data.options[0]['value']}>.`;
+  } catch (error) {
+    console.log(error);
+    var RETURN_CONTENT = 'Error occured in reopen function.';
+    var time = new Date();
+    await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
     return RETURN_CONTENT;
   }
 }

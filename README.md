@@ -49,6 +49,7 @@ Only available in testing servers:
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
 - Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be *actually useful*, but I think it'll be interesting at least)
 - Automate deck duplication and swaps processes
+- Make /migrate send an error when it can't move tournament to target channel due to permissions or other difficulty accessing channel
 - Option to lock TO commands to TO that opened the tournament (low on the list due to being unsure how to best implement creating the lock)
 - ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
 - ~~Better discord message character limit fix (weblink)~~ (current fix seems fine for expected tournament size, this may be useful in the future though)

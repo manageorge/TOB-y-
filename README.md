@@ -2,7 +2,7 @@
 Tournament Organizer Bot, TOB(y), is a discord bot intended to reduce TO administrative overhead by handling player registration, pairing, and reporting. TOB(y) identifies tournaments by channel id so a server can have multiple ongoing tournaments. The bot is powered by two CloudFlare workers, one taking in the requests from discord (server_worker) and another creating responses to requests and maintaining a related database (processor_worker).
 
 # Using TOB(y)
-Add TOB(y) to your server [here](https://discord.com/oauth2/authorize?client_id=1253129653250424873).
+Add TOB(y) to your server [here](https://discord.com/oauth2/authorize?client_id=1253129653250424873&permissions=2147485696&integration_type=0&scope=applications.commands+bot).
 
 TOs need to have a role matching "TO", "tournament organizer", "tournament-organizer", or "tournament_organizer" (capitalization is not important). All users with a role matching any of these names will have access to TO commands in every channel of the server.
 

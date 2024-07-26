@@ -36,6 +36,7 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
+- /check_registered: (TO) sends a list of registered players via DM (implemented in next version)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
 - Code errors send message to private testing server

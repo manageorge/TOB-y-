@@ -36,10 +36,10 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
-- /check_registered: (TO) sends a list of registered players via DM (implemented in next version)
-- Make /standings error if called before registration closed (implemented in next version)
-- Change /report into modal (form) instead of using parameters (implemented in next version, also for /report_other)
-- Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in next version for all modals/forms except end and drop)
+- /check_registered: (TO) sends a list of registered players via DM (implemented in live version)
+- Make /standings error if called before registration closed (implemented in live version)
+- Change /report into modal (form) instead of using parameters (implemented in live version, also for /report_other)
+- Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in live version for all modals/forms except end and drop)
 - Add ping parameter to TO _other commands, default to ping (currently pings)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close

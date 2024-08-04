@@ -39,7 +39,8 @@ Only available in testing servers:
 - /check_registered: (TO) sends a list of registered players via DM (implemented in next version)
 - Make /standings error if called before registration closed (implemented in next version)
 - Change /report into modal (form) instead of using parameters (implemented in next version, also for /report_other)
-- Change setup, register, and swap modals to default to existing settings or submission, if any
+- Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in next version for all modals/forms except end and drop)
+- Add ping parameter to TO _other commands, default to ping (currently pings)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
 - Code errors send message to private testing server

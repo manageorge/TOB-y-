@@ -37,13 +37,15 @@ Only available in testing servers:
 
 # Features Coming Soon
 - /check_registered: (TO) sends a list of registered players via DM (implemented in next version)
+- Make /standings error if called before registration closed
+- Change /report into modal (form) instead of using parameters
+- Change setup, register, and swap modals to default to existing settings or submission, if any
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
 - Code errors send message to private testing server
 - /tournament_status: (TO) view settings and status for the channel's tournament
 - /status: view your tournament details including if you've entered or dropped, overall record, current round record, and current round swaps
 - TO tools to view and modify a player's registration, reporting, and swaps
-- Change setup, register, and swap modals to default to existing settings or submission, if any
 - TO tools to change round's pairings
 - Dynamic tournament points
 - Support for single and double elimination tournaments

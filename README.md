@@ -41,6 +41,8 @@ Only available in testing servers:
 - Change /report and /report_other into modals (forms) instead of using parameters (implemented in live version)
 - Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in live version for all modals/forms except end and drop)
 - TO tools to view and modify a player's registration, reporting, and swaps (accomplished through above modal change combined with existing _other commands)
+- Automate deck duplication
+- Fix guild name issue in /check_registered
 - Add ping parameter to TO _other commands, default to ping (currently pings)
 - /topcut: (TO) pair single-elimination rounds for top N players
 - Option to create pairings upon using /close
@@ -52,7 +54,7 @@ Only available in testing servers:
 - Support for single and double elimination tournaments
 - Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
 - Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be *actually useful*, but I think it'll be interesting at least)
-- Automate deck duplication and swaps processes
+- Automate swaps process
 - Make /migrate send an error when it can't move tournament to target channel due to permissions or other difficulty accessing channel
 - Option to lock TO commands to TO that opened the tournament (low on the list due to being unsure how to best implement creating the lock)
 - ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)

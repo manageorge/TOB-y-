@@ -36,26 +36,33 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
+Implemented:
 - /check_registered: (TO) sends a list of registered players via DM (implemented in live version)
 - Make /standings error if called before registration closed (implemented in live version)
 - Change /report and /report_other into modals (forms) instead of using parameters (implemented in live version)
 - Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in live version for all modals/forms except end and drop)
-- TO tools to view and modify a player's registration, reporting, and swaps (accomplished through above modal change combined with existing _other commands)
-- Automate deck duplication
-- Fix guild name issue in /check_registered
-- Add ping parameter to TO _other commands, default to ping (currently pings)
-- /topcut: (TO) pair single-elimination rounds for top N players
+- TO tools to view and modify a player's registration, reporting, and swaps (accomplished through above modal change combined with existing "_other" commands)
+- Fix guild name issue in /check_registered (implemented in live version)
+- Automate deck duplication (implemented in live version)
+- Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
+
+Planned:
 - Option to create pairings upon using /close
 - Code errors send message to private testing server
-- /tournament_status: (TO) view settings and status for the channel's tournament
-- /status: view your tournament details including if you've entered or dropped, overall record, current round record, and current round swaps
-- TO tools to change round's pairings
-- Dynamic tournament points
-- Support for single and double elimination tournaments
-- Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
-- Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be *actually useful*, but I think it'll be interesting at least)
-- Automate swaps process
 - Make /migrate send an error when it can't move tournament to target channel due to permissions or other difficulty accessing channel
-- Option to lock TO commands to TO that opened the tournament (low on the list due to being unsure how to best implement creating the lock)
+- /to: (TO) context-dependent 'menu' that reports the status of the tournament (name, open/closed/round, number of registered players, number of players reported for round) and buttons to call functions that are currently relevant
+- /player: context-dependent 'menu' that reports player's status (registration, record, round record, swaps)
+view your tournament details including if you've entered or dropped, overall record, current round record, and current round swaps
+- TO tools to change round's pairings
+- /topcut: (TO) pair single-elimination rounds for top N players
+- Support for single and double elimination tournaments
+- Automate swaps process (challenges in setting up appropriate guardrails for user input [formatting, spellcheck], including maintaining a card name database for the spellcheck process and ensuring user input into spellcheck process)
+- Dynamic tournament points (this will require re-writing much of the bot)
+- General code clean-up and function optimization (focus on optimizing speed, especially for pairing and standing functions)
+- Use archived tournaments for canlander matchup data (I don't think we'll ever have enough matches for this data to be actually useful, but I think it'll be interesting at least)
+
+Cut:
+- ~~Option to lock TO commands to TO that opened the tournament~~ (removed due to being unsure how to best implement creating the lock, who should be able to modify or remove the lock... trust seems like a better system)
+- ~~Add ping parameter to TO \_other commands, default to ping (currently pings)~~ (probably better that these ping so the targeted user is aware of changes made by the TO)
 - ~~/undrop: (TO) add a dropped player back to the tournament~~ (decided this isn't worth prioritizing at the moment)
 - ~~Better discord message character limit fix (weblink)~~ (current fix seems fine for expected tournament size, this may be useful in the future though)

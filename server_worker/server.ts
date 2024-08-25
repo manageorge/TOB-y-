@@ -1,3 +1,7 @@
+/**
+ * The core server that runs on a Cloudflare worker.
+ */
+
 import { AutoRouter } from 'itty-router';
 import {
   InteractionResponseType,
@@ -27,7 +31,8 @@ import {
   REGISTER_OTHER_COMMAND,
   DROP_OTHER_COMMAND,
   FEEDBACK_COMMAND,
-  MIGRATE_COMMAND
+  MIGRATE_COMMAND,
+  CHECK_REGISTERED_COMMAND
 } from './commands.js';
 import {
   SingleElimination,
@@ -40,6 +45,7 @@ import {
   to_check,
   ack_and_queue
 } from './functions.js'
+import puppeteer from "@cloudflare/puppeteer";
 
 class JsonResponse extends Response {
   constructor(body, init) {
@@ -92,6 +98,12 @@ router.post('/', async (request, env) => {
           var isTO = await to_check(interaction, env);
           if (!isTO) {
             var RETURN_CONTENT = insufficientPermissions;
+            break;
+          }
+          //elimination style supported check
+          var supported_elim_styles = ['swiss'];//, 'single elimination'];
+          if (!supported_elim_styles.includes(interaction.data['components'][3]['components'][0]['value'])) {
+            var RETURN_CONTENT = `Error: Elimination style not supported. Available options are 'swiss' and 'single elimination'.`;
             break;
           }
           await ack_and_queue(interaction, env);
@@ -262,6 +274,39 @@ router.post('/', async (request, env) => {
           break;
         }
       }
+      case 'slash_report_modal': {
+        try {
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /report modal processing.';
+          break;
+        }
+      }
+      case 'slash_report_other_modal': {
+        try {
+          //temp_to check
+          var temp_to_fetch = await env.DB.prepare('SELECT target_id FROM temp_to WHERE to_id = ? AND tournament_id = ? AND command = ? ORDER BY ROWID DESC LIMIT 1').bind(interaction.member.user.id, tournament_id, 'report_other').all();
+          if (temp_to_fetch['results'].length == 0) {
+            var RETURN_CONTENT = 'Error: No data recorded in temp_to.';
+            break;
+          }
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /report_other modal processing.';
+          break;
+        }
+      }
+      case 'slash_open_modal': {
+        try {
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /open modal processing.';
+          break;
+        }
+      }
       default:
         var RETURN_CONTENT = `Unrecognized modal ${interaction.data['custom_id']}. This shouldn't happen. If you're seeing this, celebrate by eating an egg.`;
     }
@@ -303,7 +348,49 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = 'Error: There is already a tournament open in this channel.';
             break;
           }
-          await ack_and_queue(interaction, env);
+          //build open modal
+          var RETURN_TYPE = InteractionResponseType.MODAL;
+          var RETURN_CUSTOM_ID = 'slash_open_modal';
+          var RETURN_TITLE = 'Set name and decklist sharing';
+          var RETURN_COMPONENTS = [
+          {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_t_name',
+                style: 1,
+                label: 'Tournament name:',
+                min_length: 0,
+                max_length: 100,
+                placeholder: 'Optional',
+                required: false,
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_to_moxfield',
+                style: 1,
+                label: 'TO Moxfield (for decklist sharing)',
+                min_length: 0,
+                max_length: 100,
+                placeholder: `Not yet functional`,
+                required: false,
+              }]
+            },
+          ];
+          //fetch tournament defaults
+          var tournament_defaults_fetch = await env.DB.prepare('SELECT t_name, to_moxfield FROM tournament_defaults WHERE id = ?').bind(tournament_id).all();
+          if (tournament_defaults_fetch['results'].length > 0) {
+            if (tournament_defaults_fetch['results'][0]['t_name']) {
+              RETURN_COMPONENTS[0]['components'][0]['value'] = tournament_defaults_fetch['results'][0]['t_name'];
+            }
+            if (tournament_defaults_fetch['results'][0]['to_moxfield']) {
+              RETURN_COMPONENTS[0]['components'][0]['value'] = tournament_defaults_fetch['results'][0]['to_moxfield'];
+            }
+          }
+          break;
         } catch (error) {
           console.log(error)
           var RETURN_CONTENT = 'Error occured in /open intake.';
@@ -343,6 +430,27 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = insufficientPermissions;
             break;
           }
+          //establish default settings
+          var decklist_req = 'n';
+          var decklist_pub = 'n';
+          var format = 'unknown';
+          var elim_style = 'swiss';
+          //if tournament has an entry in tournament_defaults, use those values instead
+          var check_defaults = await env.DB.prepare("SELECT * FROM tournament_defaults WHERE id = ?").bind(tournament_id).all();
+          if (check_defaults['results'].length > 0) {
+            if (check_defaults['results'][0]['decklist_req'] == 'true') {
+              decklist_req = 'y';
+            } else {
+              decklist_req = 'n';
+            }
+            if (check_defaults['results'][0]['decklist_pub'] == 'true') {
+              decklist_pub = 'y';
+            } else {
+              decklist_pub = 'n';
+            }
+            format = check_defaults['results'][0]['t_format'];
+            elim_style = check_defaults['results'][0]['elim_style'];
+          }
           //build setup modal
           var RETURN_TYPE = InteractionResponseType.MODAL;
           var RETURN_CUSTOM_ID = 'slash_set_defaults_modal';
@@ -357,7 +465,7 @@ router.post('/', async (request, env) => {
                 label: 'Require decklists? (y/n)',
                 min_length: 1,
                 max_length: 1,
-                value: 'n',
+                value: `${decklist_req}`,
               }]
             },
             {
@@ -369,7 +477,7 @@ router.post('/', async (request, env) => {
                 label: 'Public decklists? (y/n)',
                 min_length: 1,
                 max_length: 1,
-                value: 'n',
+                value: `${decklist_pub}`,
               }]
             }, 
             {  
@@ -381,7 +489,7 @@ router.post('/', async (request, env) => {
                 label: 'Format',
                 min_length: 0,
                 max_length: 50,
-                value: 'unknown',
+                value: `${format}`,
               }]
             },
             {
@@ -391,7 +499,7 @@ router.post('/', async (request, env) => {
                 custom_id: 'modal_elim_style',
                 style: 1,
                 label: 'Elimination style (only swiss supported)',
-                value: 'swiss',
+                value: `${elim_style}`,
               }]
             }
           ];
@@ -419,6 +527,14 @@ router.post('/', async (request, env) => {
           if (ongoing_tournaments_fetch['results'][0]['decklist_req'] == 'true') {
             var decklist_req = true;
           }
+          //fetch player data
+          var players_fetch = await env.DB.prepare('SELECT * FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, interaction.member.user.id).all();
+          if (players_fetch['results'].length > 0) {
+            var name = players_fetch['results'][0]['name'];
+            var deck_name = players_fetch['results'][0]['deck_name'];
+            var deck_link = players_fetch['results'][0]['deck_link'];
+            var pronouns = players_fetch['results'][0]['pronouns'];
+          }
           //build register modal
           var RETURN_TYPE = InteractionResponseType.MODAL;
           var RETURN_CUSTOM_ID = 'slash_register_modal';
@@ -430,10 +546,23 @@ router.post('/', async (request, env) => {
                 type: 4,
                 custom_id: 'modal_name',
                 style: 1,
-                label: 'Name and pronouns',
+                label: 'Name',
                 min_length: 1,
                 max_length: 150,
                 placeholder: `Leave blank to be mentioned with only your @.`,
+                required: false,
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_pronouns',
+                style: 1,
+                label: 'Pronouns',
+                min_length: 1,
+                max_length: 150,
+                placeholder: `Optional, but appreciated.`,
                 required: false,
               }]
             },
@@ -463,6 +592,18 @@ router.post('/', async (request, env) => {
                   }]
                 },
               );
+            if (deck_link) {
+              RETURN_COMPONENTS[3]['components'][0]['value'] = deck_link;  
+            }
+          }
+          if (name) {
+            RETURN_COMPONENTS[0]['components'][0]['value'] = name;
+          }
+          if (pronouns) {
+            RETURN_COMPONENTS[1]['components'][0]['value'] = pronouns;
+          }
+          if (deck_name) {
+            RETURN_COMPONENTS[2]['components'][0]['value'] = deck_name;
           }
           break;
         } catch (error) {
@@ -505,14 +646,77 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = 'Error: No pairings found.';
             break;
           } 
-          var target_id = interaction.member.user.id;
+          //get round data
+          var ongoing_tournaments_fetch = await env.DB.prepare('SELECT round FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+          var round = ongoing_tournaments_fetch['results'][0]['round'];
           //check for user in pairings
-          var pairings_fetch_one = await env.DB.prepare('SELECT player_one, player_two FROM pairings WHERE tournament_id = ? AND (player_one = ? OR player_two = ?)').bind(tournament_id, target_id, target_id).run();
+          var target_id = interaction.member.user.id;
+          var pairings_fetch_one = await env.DB.prepare('SELECT player_one, player_two, record_p1, record_p2 FROM pairings WHERE tournament_id = ? AND (player_one = ? OR player_two = ?) AND round = ?').bind(tournament_id, target_id, target_id, round).all();
           if (pairings_fetch_one['results'].length == 0) {
             var RETURN_CONTENT =  `Error: <@${target_id}> is not included in current pairings.`;
             break;
           }
-          await ack_and_queue(interaction, env);
+          //set target record
+          if (pairings_fetch_one['results'][0]['player_one'] == target_id) {
+            if (pairings_fetch_one['results'][0]['record_p1']) {
+              var record = pairings_fetch_one['results'][0]['record_p1'];
+            }
+          } else if (pairings_fetch_one['results'][0]['player_two'] == target_id){
+            if (pairings_fetch_one['results'][0]['record_p2']) {
+              var record = pairings_fetch_one['results'][0]['record_p2'];
+            }
+          }
+          //build report modal
+          var RETURN_TYPE = InteractionResponseType.MODAL;
+          var RETURN_CUSTOM_ID = 'slash_report_modal';
+          var RETURN_TITLE = 'Report match results.';
+          var RETURN_COMPONENTS = [
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_wins',
+                style: 1,
+                label: 'Wins',
+                min_length: 1,
+                max_length: 1,
+                placeholder: `Number of games you won`
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_losses',
+                style: 1,
+                label: 'Losses',
+                min_length: 1,
+                max_length: 1,
+                placeholder: 'Number of games you lost'
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_ties',
+                style: 1,
+                label: 'Ties',
+                min_length: 0,
+                max_length: 1,
+                placeholder: 'Number of games tied (optional)',
+                required: false
+              }]
+            },
+          ];
+          if (record) {
+            RETURN_COMPONENTS[0]['components'][0]['value'] = record.charAt(0);
+            RETURN_COMPONENTS[1]['components'][0]['value'] = record.charAt(2);
+            if (record.length > 3) {
+              RETURN_COMPONENTS[2]['components'][0]['value'] = record.charAt(4);
+            }
+          }
+          break;
         } catch (error) {
           console.log(error);
           var RETURN_CONTENT = 'Error occured in /report intake.';
@@ -602,15 +806,35 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = insufficientPermissions;
             break;
           }
-          //check if request is in testing discords
+          //check if request is in Rodeo discord or my testing discords
           var is_test_guild = false;
-          var test_guilds = [<TEST_GUILD_IDS>];
+          //ids: removed
+          var test_guilds = [<REMOVED>, <REMOVED>, <REMOVED>, '<REMOVED>', '<REMOVED>', '<REMOVED>'];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
           if (!is_test_guild) {
             var RETURN_CONTENT = 'Error: The requested function is not available in this server.';
             break;
+          }
+          //establish default settings
+          var swaps_count = 0;
+          var swaps_pub = 'n';
+          var swaps_balanced = 'y';
+          //if tournament has an entry in tournament_defaults, use those values instead
+          var check_defaults = await env.DB.prepare("SELECT * FROM tournament_defaults WHERE id = ?").bind(tournament_id).all();
+          if (check_defaults['results'].length > 0) {
+            swaps_count = check_defaults['results'][0]['swaps'];
+            if (check_defaults['results'][0]['swaps_pub'] == 'true') {
+              swaps_pub = 'y';
+            } else {
+              swaps_pub = 'n';
+            }
+            if (check_defaults['results'][0]['swaps_balanced'] == 'true') {
+              swaps_balanced = 'y';
+            } else {
+              swaps_balanced = 'n';
+            }
           }
           //send to modal
           var RETURN_TYPE = InteractionResponseType.MODAL;
@@ -626,7 +850,7 @@ router.post('/', async (request, env) => {
                 label: 'Allow swaps? (number, 0 = no) [not enforced]',
                 min_length: 1,
                 max_length: 4,
-                value: 0,
+                value: `${swaps_count}`,
               }],
             },
             {
@@ -638,7 +862,7 @@ router.post('/', async (request, env) => {
                 label: 'Public swaps? (y/n)',
                 min_length: 1,
                 max_length: 1,
-                value: 'n',
+                value: `${swaps_pub}`,
               }]
             },
             {
@@ -650,7 +874,7 @@ router.post('/', async (request, env) => {
                 label: 'Balanced swaps? [not enforced yet]',
                 min_length: 1,
                 max_length: 1,
-                value: 'y',
+                value: `${swaps_balanced}`,
               }]
             },
           ];
@@ -663,15 +887,42 @@ router.post('/', async (request, env) => {
       }
       case SWAPS_COMMAND.name.toLowerCase(): {
         try {
-          //check if request is in testing discords
+          //check if request is in Rodeo discord or my testing discords
           var is_test_guild = false;
-          var test_guilds = [<TEST_GUILD_IDS>];
+          //ids: <REMOVED>
+          var test_guilds = [<REMOVED>, <REMOVED>, <REMOVED>, '<REMOVED>', '<REMOVED>', '<REMOVED>'];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
           if (!is_test_guild) {
             var RETURN_CONTENT = 'Error: The requested function is not available in this server.';
             break;
+          }
+          //get round data
+          var ongoing_tournaments_fetch = await env.DB.prepare('SELECT round FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+          var round = ongoing_tournaments_fetch['results'][0]['round'];
+          //check for user in pairings
+          var target_id = interaction.member.user.id;
+          var pairings_fetch_one = await env.DB.prepare('SELECT player_one, player_two, p1_adds, p1_cuts, p2_adds, p2_cuts FROM pairings WHERE tournament_id = ? AND (player_one = ? OR player_two = ?) AND round = ?').bind(tournament_id, target_id, target_id, round).all();
+          if (pairings_fetch_one['results'].length == 0) {
+            var RETURN_CONTENT =  `Error: <@${target_id}> is not included in current pairings.`;
+            break;
+          }
+          //set user record
+          if (pairings_fetch_one['results'][0]['player_one'] == target_id) {
+            if (pairings_fetch_one['results'][0]['p1_adds']) {
+              var adds = pairings_fetch_one['results'][0]['p1_adds'];
+            }
+            if (pairings_fetch_one['results'][0]['p1_cuts']) {
+              var cuts = pairings_fetch_one['results'][0]['p1_cuts'];
+            }
+          } else {
+            if (pairings_fetch_one['results'][0]['p2_adds']) {
+              var adds = pairings_fetch_one['results'][0]['p2_adds'];
+            }
+            if (pairings_fetch_one['results'][0]['p2_cuts']) {
+              var cuts = pairings_fetch_one['results'][0]['p2_cuts'];
+            }
           }
           //send to modal
           var RETURN_TYPE = InteractionResponseType.MODAL;
@@ -705,6 +956,12 @@ router.post('/', async (request, env) => {
               }]
             },
           ];
+          if (adds) {
+            RETURN_COMPONENTS[0]['components'][0]['value'] = adds;
+          }
+          if (cuts) {
+            RETURN_COMPONENTS[1]['components'][0]['value'] = cuts;
+          }
           break;
         } catch (error) {
           console.log(error)
@@ -788,9 +1045,10 @@ router.post('/', async (request, env) => {
       }
       case AUTOFILL_COMMAND.name.toLowerCase(): {
         try{
-          //check if request is in testing discords
+          //check if request is in my testing discords
           var is_test_guild = false;
-          var test_guilds = [<TEST_GUILD_IDS>];
+          //ids: <REMOVED>
+          var test_guilds = [<REMOVED>, <REMOVED>, '<REMOVED>', '<REMOVED>'];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -823,9 +1081,10 @@ router.post('/', async (request, env) => {
       }
       case AUTOREPORT_COMMAND.name.toLowerCase(): {
         try{
-          //check if request is in testing discords
+          //check if request is in my testing discords
           var is_test_guild = false;
-          var test_guilds = [<TEST_GUILD_IDS>];
+          //ids: <REMOVED>
+          var test_guilds = [<REMOVED>, <REMOVED>, '<REMOVED>', '<REMOVED>'];
           if (test_guilds.includes(interaction.guild_id)) {
             is_test_guild = true;
           }
@@ -863,12 +1122,75 @@ router.post('/', async (request, env) => {
           } 
           var target_id = interaction.data.options[0]['value'];
           //check for target in pairings
-          var pairings_fetch_one = await env.DB.prepare('SELECT player_one, player_two FROM pairings WHERE tournament_id = ? AND (player_one = ? OR player_two = ?)').bind(tournament_id, target_id, target_id).run();
+          var pairings_fetch_one = await env.DB.prepare('SELECT player_one, player_two, record_p1, record_p2 FROM pairings WHERE tournament_id = ? AND (player_one = ? OR player_two = ?)').bind(tournament_id, target_id, target_id).run();
           if (pairings_fetch_one['results'].length == 0) {
             var RETURN_CONTENT =  `Error: <@${target_id}> is not included in current pairings.`;
             break;
           }
-          await ack_and_queue(interaction, env);
+          //set target record
+          if (pairings_fetch_one['results'][0]['player_one'] == target_id) {
+            if (pairings_fetch_one['results'][0]['record_p1']) {
+              var record = pairings_fetch_one['results'][0]['record_p1'];
+            }
+          } else {
+            if (pairings_fetch_one['results'][0]['record_p2']) {
+              var record = pairings_fetch_one['results'][0]['record_p2'];
+            }
+          }
+          //build report modal
+          var RETURN_TYPE = InteractionResponseType.MODAL;
+          var RETURN_CUSTOM_ID = 'slash_report_other_modal';
+          var RETURN_TITLE = `Report match results.`;
+          var RETURN_COMPONENTS = [
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_wins',
+                style: 1,
+                label: 'Wins',
+                min_length: 1,
+                max_length: 1,
+                placeholder: `Number of games player won`
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_losses',
+                style: 1,
+                label: 'Losses',
+                min_length: 1,
+                max_length: 1,
+                placeholder: 'Number of games player lost'
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_ties',
+                style: 1,
+                label: 'Ties',
+                min_length: 1,
+                max_length: 1,
+                placeholder: 'Number of games tied (optional)',
+                required: false
+              }]
+            },
+          ];
+          if (record) {
+            RETURN_COMPONENTS[0]['components'][0]['value'] = record.charAt(0);
+            RETURN_COMPONENTS[1]['components'][0]['value'] = record.charAt(2);
+            if (record.length > 3) {
+              RETURN_COMPONENTS[2]['components'][0]['value'] = record.charAt(4);
+            }
+          }
+          //record target data
+          var register_id = interaction.data.options[0]['value'];
+          await env.DB.prepare('INSERT INTO temp_to (to_id, target_id, tournament_id, command) VALUES (?, ?, ?, ?)').bind(interaction.member.user.id, register_id, tournament_id, 'report_other').run();
+          break;
         } catch (error) {
           console.log(error);
           var RETURN_CONTENT = 'Error occured in /report_other intake.';
@@ -889,19 +1211,30 @@ router.post('/', async (request, env) => {
             var RETURN_CONTENT = 'Error: No ongoing tournament in this channel.';
             break;
           }
-          if (ongoing_tournaments_fetch['results'][0]['open'] == 'false') {
-            var RETURN_CONTENT = 'Error: Tournament registration is already closed.';
-            break;
-          }
           //determine if decklink is required
           var decklist_req = false;
           if (ongoing_tournaments_fetch['results'][0]['decklist_req'] == 'true') {
             var decklist_req = true;
           }
+          //fetch player data
+          var target_id = interaction.data.options[0]['value'];
+          var players_fetch = await env.DB.prepare('SELECT * FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, target_id).all();
+          if (players_fetch['results'].length > 0) {
+            var name = players_fetch['results'][0]['name'];
+            var deck_name = players_fetch['results'][0]['deck_name'];
+            var deck_link = players_fetch['results'][0]['deck_link'];
+            var pronouns = players_fetch['results'][0]['pronouns'];
+          } else if (ongoing_tournaments_fetch['results'][0]['open'] == 'false') {
+            var RETURN_CONTENT = 'Error: Registration closed, cannot register new user. (TOs can reopen registration with /reopen)';
+            break;
+          }
           //build register_other modal
           var RETURN_TYPE = InteractionResponseType.MODAL;
           var RETURN_CUSTOM_ID = 'slash_register_other_modal';
           var RETURN_TITLE = 'Register user for tournament in this channel.';
+          if (ongoing_tournaments_fetch['results'][0]['open'] == 'false') {
+            RETURN_TITLE = 'Update player registration.';
+          }
           var RETURN_COMPONENTS = [
             {
               type: 1,
@@ -909,10 +1242,23 @@ router.post('/', async (request, env) => {
                 type: 4,
                 custom_id: 'modal_name',
                 style: 1,
-                label: `User's name and pronouns`,
+                label: 'Name',
                 min_length: 1,
                 max_length: 150,
-                placeholder: `Leave blank to be mentioned with only their @.`,
+                placeholder: `Leave blank to be mentioned with only your @.`,
+                required: false,
+              }]
+            },
+            {
+              type: 1,
+              components: [{
+                type: 4,
+                custom_id: 'modal_pronouns',
+                style: 1,
+                label: 'Pronouns',
+                min_length: 1,
+                max_length: 150,
+                placeholder: `Optional, but appreciated.`,
                 required: false,
               }]
             },
@@ -942,10 +1288,21 @@ router.post('/', async (request, env) => {
                   }]
                 },
               );
+            if (deck_link) {
+              RETURN_COMPONENTS[3]['components'][0]['value'] = deck_link;  
+            }
+          }
+          if (name) {
+            RETURN_COMPONENTS[0]['components'][0]['value'] = name;
+          }
+          if (pronouns) {
+            RETURN_COMPONENTS[1]['components'][0]['value'] = pronouns;
+          }
+          if (deck_name) {
+            RETURN_COMPONENTS[2]['components'][0]['value'] = deck_name;
           }
           //record target data
-          var register_id = interaction.data.options[0]['value'];
-          await env.DB.prepare('INSERT INTO temp_to (to_id, target_id, tournament_id, command) VALUES (?, ?, ?, ?)').bind(interaction.member.user.id, register_id, tournament_id, 'register_other').run();
+          await env.DB.prepare('INSERT INTO temp_to (to_id, target_id, tournament_id, command) VALUES (?, ?, ?, ?)').bind(interaction.member.user.id, target_id, tournament_id, 'register_other').run();
           break;
         } catch (error) {
           console.log(error);
@@ -1020,8 +1377,8 @@ router.post('/', async (request, env) => {
               style: 2,
               label: 'Message:',
               min_length: 1,
-              max_length: 4000,
-              value: 'Message may be made publicly viewable',
+              max_length: 2000,
+              placeholder: 'Message may be made publicly viewable',
             }]
           },
           ];
@@ -1057,6 +1414,27 @@ router.post('/', async (request, env) => {
         } catch (error) {
           console.log(error);
           var RETURN_CONTENT = 'Error occured in /migrate intake.';
+          break;
+        }
+      }
+      case CHECK_REGISTERED_COMMAND.name.toLowerCase(): {
+        try {
+          //TO check
+          var isTO = await to_check(interaction, env);
+          if (!isTO) {
+            var RETURN_CONTENT = insufficientPermissions;
+            break;
+          }
+          //ongoing tournament check
+          var ongoing_tournaments_fetch = await env.DB.prepare("SELECT * FROM ongoing_tournaments WHERE id = ?").bind(tournament_id).all();
+          if (ongoing_tournaments_fetch['results'].length == 0) {
+            var RETURN_CONTENT = 'Error: No ongoing tournament in this channel.';
+            break;
+          }
+          await ack_and_queue(interaction, env);
+        } catch (error) {
+          console.log(error)
+          var RETURN_CONTENT = 'Error occured in /check_registered intake.';
           break;
         }
       }

@@ -16,7 +16,8 @@ export async function pair(input) {
   try {
     //unpack input
     var env = input.env;
-    var tournament_id = input.tournament_id;
+    let interaction = input.interaction;
+    let tournament_id = interaction.guild_id + interaction.channel_id;
     //check if tournament ongoing and closed
     var ongoing_tournaments_fetch = await env.DB.prepare('SELECT * FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
     if (ongoing_tournaments_fetch['results'].length == 0) {
@@ -44,6 +45,15 @@ export async function pair(input) {
     //if (round == 0 || all reports recieved), pair new round, else return pairings or 'no pairings exist'
     var report_null_p1 = await env.DB.prepare('SELECT player_one FROM pairings WHERE tournament_id = ? AND round = ? AND record_p1 IS NULL').bind(tournament_id, round).all();
     var report_null_p2 = await env.DB.prepare('SELECT player_two FROM pairings WHERE tournament_id = ? AND round = ? AND record_p2 IS NULL').bind(tournament_id, round).all();
+    if (round != 0 && (report_null_p1['results'].length != 0 || report_null_p2['results'].length != 0)) {
+      var input = {
+        'env': env,
+        'interaction': interaction
+      };
+      var output = await missing_results(input);
+      output += `\n(Above players were pinged)`;
+      return output;
+    }
     if (round == 0 || (report_null_p1['results'].length == 0 && report_null_p2['results'].length == 0)) {
       //record points in players
       if (round > 0) {
@@ -199,7 +209,7 @@ export async function pair(input) {
       var pairings_exist = true;
       await env.DB.prepare('UPDATE ongoing_tournaments SET round = ? WHERE id = ?').bind(round, tournament_id).run();
     }
-    var pairings_text = `Round ${round} pairings:\n`;
+    var pairings_text = `**Round ${round} pairings:**`;
     //if (all reports not recived and round > 0), return exisiting pairings or 'no pairings exist'
     if (pairings_exist) {
       //make pairings text
@@ -211,10 +221,10 @@ export async function pair(input) {
         round_pairings.push(pair);
       }
       //grab and process player data
-      var decks_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name FROM players WHERE tournament_id = ?').bind(tournament_id).all();
+      var decks_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, pronouns FROM players WHERE tournament_id = ?').bind(tournament_id).all();
       var decks_dict = {};
       for (let i = 0; i < decks_fetch['results'].length; i++) {
-        decks_dict[decks_fetch['results'][i]['player_id']] = [decks_fetch['results'][i]['deck_name'], decks_fetch['results'][i]['deck_link'], decks_fetch['results'][i]['name']];
+        decks_dict[decks_fetch['results'][i]['player_id']] = [decks_fetch['results'][i]['deck_name'], decks_fetch['results'][i]['deck_link'], decks_fetch['results'][i]['name'], decks_fetch['results'][i]['pronouns']];
       }
       //actually make the text now
       var bye_text = ''
@@ -224,29 +234,39 @@ export async function pair(input) {
         var p1_name = decks_dict[p1][2];
         var format_p1_l = '';
         var format_p1_r = '';
-        if (p1_name != '') {
+        if (p1_name) {
           var format_p1_l = ' (';
           var format_p1_r = ')';
         }
+        if (p1_name && decks_dict[p1][3]) {
+          p1_name += ` (${decks_dict[p1][3]}`;
+        } else if (decks_dict[p1][3]) {
+          format_p1_r += ` (${decks_dict[p1][3]}`;
+        }
         if (p2 == 'bye') {
-          bye_text += `\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} has the bye this round!`;
+          bye_text += `\n\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} has the bye this round!`;
           continue;
         }
         var format_p2_l = '';
         var format_p2_r = '';
         var p2_name = decks_dict[p2][2];
-        if (p2_name != '') {
+        if (p2_name) {
           var format_p2_l = ' (';
           var format_p2_r = ')';
+        }
+        if (p2_name && decks_dict[p2][3]) {
+          p2_name += ` (${decks_dict[p2][3]}`;
+        } else if (decks_dict[p2][3]) {
+          format_p2_r += ` (${decks_dict[p2][3]}`;
         }
         if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
           var p1_deck_name = decks_dict[p1][0];
           var p1_deck_link = decks_dict[p1][1];
           var p2_deck_name = decks_dict[p2][0];
           var p2_deck_link = decks_dict[p2][1];
-          pairings_text += `\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} on [${p1_deck_name}](<${p1_deck_link}>) vs ${p2_name}${format_p2_l}<@${p2}>${format_p2_r} on [${p2_deck_name}](<${p2_deck_link}>)`;
+          pairings_text += `\n\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} on [${p1_deck_name}](<${p1_deck_link}>) vs ${p2_name}${format_p2_l}<@${p2}>${format_p2_r} on [${p2_deck_name}](<${p2_deck_link}>)`;
         } else {
-          pairings_text += `\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} vs ${p2_name}${format_p2_l}<@${p2}>${format_p2_r}`;
+          pairings_text += `\n\n${p1_name}${format_p1_l}<@${p1}>${format_p1_r} vs ${p2_name}${format_p2_l}<@${p2}>${format_p2_r}`;
         }
       }
       pairings_text += bye_text;
@@ -263,7 +283,7 @@ export async function pair(input) {
   }
 }
 
-export async function open(input) {
+export async function process_open_modal(input) {
   try {
     //process inputs
     let env = input.env;
@@ -277,6 +297,16 @@ export async function open(input) {
     });
     var guild_data = await response.json();
     var tournament_id = interaction.guild_id + interaction.channel_id;
+    if (interaction.data['components'][0]['components'][0]['value']) {
+      var t_name = interaction.data['components'][0]['components'][0]['value'];
+    } else {
+      var t_name = '';
+    }
+    if (interaction.data['components'][1]['components'][0]['value']) {
+      var to_moxfield = interaction.data['components'][1]['components'][0]['value'];
+    } else {
+      var to_moxfield = '';
+    }
     //establish tournament default settings
     var t_defaults = {};
     t_defaults['id'] = tournament_id;
@@ -307,10 +337,10 @@ export async function open(input) {
       t_defaults['t_format'] = check_defaults['results'][0]['t_format'];
     } else {
       //if no entry in tournament_defaults, make one
-      await env.DB.prepare('INSERT INTO tournament_defaults (id, server_name, channel_name, decklist_req, decklist_pub, swaps, swaps_pub, elim_style, t_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t_defaults['id'], t_defaults['server_name'], t_defaults['channel_name'], t_defaults['decklist_req'], t_defaults['decklist_pub'], t_defaults['swaps'], t_defaults['swaps_pub'], t_defaults['elim_style'], t_defaults['t_format']).run();
+      await env.DB.prepare('INSERT INTO tournament_defaults (id, server_name, channel_name, decklist_req, decklist_pub, swaps, swaps_pub, elim_style, t_format, t_name, to_moxfield) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t_defaults['id'], t_defaults['server_name'], t_defaults['channel_name'], t_defaults['decklist_req'], t_defaults['decklist_pub'], t_defaults['swaps'], t_defaults['swaps_pub'], t_defaults['elim_style'], t_defaults['t_format'], t_name, to_moxfield).run();
     }
     //make new tournament entry in ongoing_tournaments table
-    await env.DB.prepare('INSERT INTO ongoing_tournaments (id, open, round, decklist_req, decklist_pub, swaps, swaps_pub, elim_style, t_format) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t_defaults['id'], 'true', 0, t_defaults['decklist_req'], t_defaults['decklist_pub'], t_defaults['swaps'], t_defaults['swaps_pub'], t_defaults['elim_style'], t_defaults['t_format']).run();
+    await env.DB.prepare('INSERT INTO ongoing_tournaments (id, open, round, decklist_req, decklist_pub, swaps, swaps_pub, elim_style, t_format, t_name, to_moxfield) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(t_defaults['id'], 'true', 0, t_defaults['decklist_req'], t_defaults['decklist_pub'], t_defaults['swaps'], t_defaults['swaps_pub'], t_defaults['elim_style'], t_defaults['t_format'], t_name, to_moxfield).run();
     //announce tournament
     if (t_defaults['decklist_req'] == 'true') {
       if (t_defaults['decklist_pub'] == 'true') {
@@ -331,7 +361,12 @@ export async function open(input) {
     } else {
       var announceSwaps = ``;
     }
-    return `<@${interaction.member.user.id}> has opened a tournament in this channel. Use "/toby register" to join!${announceDeck}${announceSwaps} Rounds are ${t_defaults['elim_style']}.`;
+    if (t_name) {
+      var name_placeholder = `the ${t_name}`;
+    } else {
+      var name_placeholder = 'a';
+    }
+    return `<@${interaction.member.user.id}> has opened ${name_placeholder} tournament in this channel. Use "/register" to join!${announceDeck}${announceSwaps} Rounds are ${t_defaults['elim_style']}.`;
   } catch (error) {
     console.log(error);
     var RETURN_CONTENT = 'Error occured in open function.';
@@ -349,7 +384,22 @@ export async function close(input) {
     let tournament_id = interaction.guild_id + interaction.channel_id;
     //close registration
     await env.DB.prepare('UPDATE ongoing_tournaments SET open = ? WHERE id = ?').bind('false', tournament_id).run();
-    return `<@${interaction.member.user.id}> closed tournament registration.`;
+    var ongoing_tournaments_fetch = await env.DB.prepare('SELECT t_name, to_moxfield FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+    if (ongoing_tournaments_fetch['results'][0]['t_name']) {
+      var name_placeholder = ` for the ${ongoing_tournaments_fetch['results'][0]['t_name']} tournament.`;
+    } else {
+      var name_placeholder = `.`;
+    }
+    /*
+    if (ongoing_tournaments_fetch['results'][0]['to_moxfield']) {
+      var queue = await env.TBQ.send({
+        f_call: 'share',
+        interaction: interaction,
+        to_moxfield: ongoing_tournaments_fetch['results'][0]['to_moxfield']
+      });
+    }
+    */
+    return `<@${interaction.member.user.id}> closed tournament registration${name_placeholder}`;
   } catch (error) {
     console.log(error);
     var RETURN_CONTENT = 'Error occured in close function.';
@@ -385,21 +435,31 @@ export async function pairing(input) {
     //grab and process player info
     var p1 = pairings_fetch['results'][0]['player_one'];
     var p2 = pairings_fetch['results'][0]['player_two'];
-    var p1_deck_fetch = await env.DB.prepare('SELECT deck_name, deck_link, name FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, p1).all();
-    var p2_deck_fetch = await env.DB.prepare('SELECT deck_name, deck_link, name FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, p2).all();
+    var p1_deck_fetch = await env.DB.prepare('SELECT deck_name, deck_link, name, pronouns FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, p1).all();
+    var p2_deck_fetch = await env.DB.prepare('SELECT deck_name, deck_link, name, pronouns FROM players WHERE tournament_id = ? AND player_id = ?').bind(tournament_id, p2).all();
     var p1_name = p1_deck_fetch['results'][0]['name'];
     var format_p1_l = '';
     var format_p1_r = ''; 
-    if (p1_name != '') {
+    if (p1_name) {
       var format_p1_l = ' (';
       var format_p1_r = ')';
+    }
+    if (p1_name && p1_deck_fetch['results'][0]['pronouns']) {
+      p1_name += ` (${p1_deck_fetch['results'][0]['pronouns']})`;
+    } else if (p1_deck_fetch['results'][0]['pronouns']) {
+      format_p1_r += ` (${p1_deck_fetch['results'][0]['pronouns']})`;
     }
     var p2_name = p2_deck_fetch['results'][0]['name'];
     var format_p2_l = '';
     var format_p2_r = '';
-    if (p2_name != '') {
+    if (p2_name) {
       var format_p2_l = ' (';
       var format_p2_r = ')';
+    }
+    if (p2_name && p2_deck_fetch['results'][0]['pronouns']) {
+      p2_name += ` (${p2_deck_fetch['results'][0]['pronouns']})`;
+    } else if (p2_deck_fetch['results'][0]['pronouns']) {
+      format_p2_r += ` (${p2_deck_fetch['results'][0]['pronouns']})`;
     }
     if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
       var p1_deck_name = p1_deck_fetch['results'][0]['deck_name'];
@@ -421,24 +481,20 @@ export async function pairing(input) {
   }
 }
 
-export async function report(input) {
+export async function process_report_modals(input) {
   try {
     //process inputs
     var env = input.env;
     var interaction = input.interaction;
     var tournament_id = interaction.guild_id + interaction.channel_id;
+    var report = interaction.data['components'][0]['components'][0]['value'] + '-' + interaction.data['components'][1]['components'][0]['value'];
+    if (interaction.data['components'][2]['components'][0]['value'] && (interaction.data['components'][2]['components'][0]['value'] != '0' &&interaction.data['components'][2]['components'][0]['value'] != 0)) {
+      report += '-' + interaction.data['components'][2]['components'][0]['value'];
+    }
     if (input.target) {
       var target_id = input.target;
-      var report = interaction.data.options[1]['value'].toString() + '-' + interaction.data.options[2]['value'].toString();
-      if (interaction.data.options[3]) {
-        report += '-' + interaction.data.options[3]['value'].toString();
-      }
     } else {
       var target_id = interaction.member.user.id;
-      var report = interaction.data.options[0]['value'].toString() + '-' + interaction.data.options[1]['value'].toString();
-      if (interaction.data.options[2]) {
-        report += '-' + interaction.data.options[2]['value'].toString();
-      }
     }
     //check if tournament ongoing and closed
     var ongoing_tournaments_fetch = await env.DB.prepare('SELECT open, round, decklist_pub FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
@@ -489,7 +545,7 @@ export async function report(input) {
     return `<@${interaction.member.user.id}> reported match result: ${report}`;
   } catch (error) {
     console.log(error);
-    var RETURN_CONTENT = 'Error occured in report function.';
+    var RETURN_CONTENT = 'Error occured in process_report_modals function.';
     var time = new Date();
     await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
     return RETURN_CONTENT;
@@ -558,132 +614,194 @@ export async function standings(input) {
     if (ongoing_tournaments_fetch['results'].length == 0) {
       return 'Error: No ongoing tournament in this channel.';
     }
+    if (ongoing_tournaments_fetch['results'][0]['open'] == 'true') {
+      return 'Error: Tournament registration is still open.';
+    }
     var round = ongoing_tournaments_fetch['results'][0]['round'];
-    //grab player data
-    var player_data_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, m_score, mwp, g_score, gwp, played_ids, wins, losses, draws FROM players WHERE tournament_id = ? ORDER BY m_score').bind(tournament_id).run();
-    if (player_data_fetch['results'].length == 0) {
-      return 'Error: No players have registered for the tournament.';
+    var elim_style = ongoing_tournaments_fetch['results'][0]['elim_style'];
+    var t_name = ongoing_tournaments_fetch['results'][0]['t_name'];
+    if (t_name) {
+      t_name += ', r';
+    } else {
+      t_name = 'R';
     }
-    //process player data
-    var player_data = {};
-    for (let i = 0; i < player_data_fetch['results'].length; i++) {
-      if (!player_data_fetch['results'][i]['played_ids']) {
-        var played_ids = '';
-      } else {
-        var played_ids = player_data_fetch['results'][i]['played_ids'].split(', ');
+    //prepare standings output
+    var standings_text = '';
+    switch (elim_style.toLowerCase()) {
+      case 'swiss': {
+        //grab player data
+        var player_data_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, pronouns, m_score, mwp, g_score, gwp, played_ids, wins, losses, draws FROM players WHERE tournament_id = ? ORDER BY m_score').bind(tournament_id).run();
+        if (player_data_fetch['results'].length == 0) {
+          return 'Error: No players have registered for the tournament.';
+        }
+        //process player data
+        var player_data = {};
+        for (let i = 0; i < player_data_fetch['results'].length; i++) {
+          if (!player_data_fetch['results'][i]['played_ids']) {
+            var played_ids = '';
+          } else {
+            var played_ids = player_data_fetch['results'][i]['played_ids'].split(', ');
+          }
+          var player_wins = player_data_fetch['results'][i]['wins'];
+          if (!player_wins) {
+            player_wins = '0';
+          }
+          var player_losses = player_data_fetch['results'][i]['losses'];
+          if (!player_losses) {
+            player_losses = '0';
+          }
+          var player = {
+            'name': player_data_fetch['results'][i]['name'],
+            'player_id': player_data_fetch['results'][i]['player_id'],
+            'deck_name': player_data_fetch['results'][i]['deck_name'],
+            'deck_link': player_data_fetch['results'][i]['deck_link'],
+            'm_score': player_data_fetch['results'][i]['m_score'],
+            'mwp': player_data_fetch['results'][i]['mwp'],
+            'g_score': player_data_fetch['results'][i]['g_score'],
+            'gwp': player_data_fetch['results'][i]['gwp'],
+            'played_ids': played_ids,
+            'record': player_wins + '-' + player_losses,
+            'pronouns': player_data_fetch['results'][i]['pronouns']
+          };
+          if (player_data_fetch['results'][i]['draws']) {
+            player['record'] = player['record'] + '-' + player_data_fetch['results'][i]['draws'];
+          }
+          player_data[player_data_fetch['results'][i]['player_id']] = player;
+        }
+        //calculate omwp and ogwp, make new player data array for sorting (there has to be a better way to do this)
+        var player_array = [];
+        for (let player in player_data) {
+          var cum_omwp = 0;
+          var cum_ogwp = 0;
+          for (let opponent in player_data[player]['played_ids']) {
+            var opponent_id = player_data[player]['played_ids'][opponent];
+            cum_omwp += Math.max(player_data[opponent_id]['mwp'], 0.33);
+            cum_ogwp += Math.max(player_data[opponent_id]['gwp'], 0.33);
+          }
+          player_data[player]['omwp'] = cum_omwp / player_data[player]['played_ids'].length;
+          player_data[player]['ogwp'] = cum_ogwp / player_data[player]['played_ids'].length;
+          var data = {
+            'name': player_data[player]['name'],
+            'player_id': player_data[player]['player_id'],
+            'deck_name': player_data[player]['deck_name'],
+            'deck_link': player_data[player]['deck_link'],
+            'm_score': player_data[player]['m_score'],
+            'mwp': player_data[player]['mwp'],
+            'g_score': player_data[player]['g_score'],
+            'gwp': player_data[player]['gwp'],
+            'played_ids': player_data[player]['played_ids'],
+            'omwp': player_data[player]['omwp'],
+            'ogwp': player_data[player]['ogwp'],
+            'record': player_data[player]['record'],
+            'pronouns': player_data[player]['pronouns'],
+          };
+          player_array.push(data);
+        }
+        //sort player_array by match score, then omwp, then game score, then ogwp
+        player_array.sort(function (a, b) {
+          return b.m_score - a.m_score || b.omwp - a.omwp || b.g_score - a.g_score || b.ogwp - a.ogwp;
+        });
+        //setup other variables
+        var last_m_score = 10000;
+        var last_omwp = 1;
+        var last_g_score = 10000;
+        var last_ogwp = 1;
+        if (!round) {
+          var round = 0;
+        }
+        standings_text += `**${t_name}ound ${round} standings:**`;
+        var placement = 1;
+        var players_since_last_placement = 0;
+        //make output
+        for (let player in player_array) {
+          var name = player_array[player]['name'];
+          var player_id = player_array[player]['player_id'];
+          var deck_name = player_array[player]['deck_name'];
+          var m_score = player_array[player]['m_score'];
+          var omwp = player_array[player]['omwp'];
+          var g_score = player_array[player]['g_score'];
+          var ogwp = player_array[player]['ogwp'];
+          var record = player_array[player]['record'];
+          if (m_score < last_m_score) {
+            last_m_score = m_score;
+            last_omwp = omwp;
+            last_g_score = g_score;
+            last_ogwp = ogwp;
+            placement += players_since_last_placement;
+            players_since_last_placement = 1;
+          } else if (omwp < last_omwp){
+            last_omwp = omwp;
+            last_g_score = 10000;
+            last_ogwp = 1;
+            placement += players_since_last_placement;
+            players_since_last_placement = 1;;
+          } else if (g_score < last_g_score) {
+            last_g_score = g_score;
+            last_ogwp = 1;
+            placement += players_since_last_placement;
+            players_since_last_placement = 1;
+          } else if (ogwp < last_ogwp) {
+            last_ogwp = ogwp;
+            placement += players_since_last_placement;
+            players_since_last_placement = 1;
+          } else {
+            players_since_last_placement += 1;
+          }
+          var format_l = '';
+          var format_r = '';
+          if (name) {
+            var format_l = ' (';
+            var format_r = ')';
+          }
+          if (name && player_array[player]['pronouns']) {
+            name += ` (${player_array[player]['pronouns']})`;
+          } else if (player_array[player]['pronouns']) {
+            format_r += ` (${player_array[player]['pronouns']})`;
+          }
+          if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
+            var deck_link = player_array[player]['deck_link'];
+            standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} on [${deck_name}](<${deck_link}>) (${record})`;
+          } else {
+            standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} (${record})`;
+          }
+        }
+        break;
       }
-      var player = {
-        'name': player_data_fetch['results'][i]['name'],
-        'player_id': player_data_fetch['results'][i]['player_id'],
-        'deck_name': player_data_fetch['results'][i]['deck_name'],
-        'deck_link': player_data_fetch['results'][i]['deck_link'],
-        'm_score': player_data_fetch['results'][i]['m_score'],
-        'mwp': player_data_fetch['results'][i]['mwp'],
-        'g_score': player_data_fetch['results'][i]['g_score'],
-        'gwp': player_data_fetch['results'][i]['gwp'],
-        'played_ids': played_ids,
-        'record': player_data_fetch['results'][i]['wins'] + '-' + player_data_fetch['results'][i]['losses']
-      };
-      if (player_data_fetch['results'][i]['draws']) {
-        player['record'] = player['record'] + '-' + player_data_fetch['results'][i]['draws'];
+      /*
+      case 'single elimintation': {
+        standings_text += 'Remaining players (unordered):\n';
+        var players_fetch = await env.DB.prepare('SELECT * FROM players WHERE tournament_id = ? EXCEPT SELECT * FROM players WHERE tournament_id = ? AND (dropped NOT NULL OR eliminated NOT NULL)').bind(tournament_id, tournament_id).all();
+        for (let i = 0; i < players_fetch['results'].length; i++) {
+          var name = players_fetch['results'][i]['name'];
+          var format_l = '';
+          var format_r = '';
+          if (name) {
+            var format_l = ' (';
+            var format_r = ')';
+          }
+          var player_id = players_fetch['results'][i]['player_id'];
+          var deck_name = players_fetch['results'][i]['deck_name'];
+          var deck_link = players_fetch['results'][i]['deck_link'];
+          if (name && player_data_fetch['results'][i]['pronouns']) {
+            name += ` (${player_data_fetch['results'][i]['pronouns']})`
+          } else if (player_data_fetch['results'][i]['pronouns']) {
+            format_p_r += ` (${player_data_fetch['results'][i]['pronouns']})`
+          }
+          if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
+            standings_text += `\n${name}${format_l}<@${player_id}>${format_r} on [${deck_name}](<${deck_link}>)`;
+          } else {
+            standings_text += `\n${name}${format_l}<@${player_id}>${format_r}`;
+          }
+        }
       }
-      player_data[player_data_fetch['results'][i]['player_id']] = player;
-    }
-    //calculate omwp and ogwp, make new player data array for sorting (there has to be a better way to do this)
-    var player_array = [];
-    for (let player in player_data) {
-      var cum_omwp = 0;
-      var cum_ogwp = 0;
-      for (let opponent in player_data[player]['played_ids']) {
-        var opponent_id = player_data[player]['played_ids'][opponent];
-        cum_omwp += Math.max(player_data[opponent_id]['mwp'], 0.33);
-        cum_ogwp += Math.max(player_data[opponent_id]['gwp'], 0.33);
-      }
-      player_data[player]['omwp'] = cum_omwp / player_data[player]['played_ids'].length;
-      player_data[player]['ogwp'] = cum_ogwp / player_data[player]['played_ids'].length;
-      var data = {
-        'name': player_data[player]['name'],
-        'player_id': player_data[player]['player_id'],
-        'deck_name': player_data[player]['deck_name'],
-        'deck_link': player_data[player]['deck_link'],
-        'm_score': player_data[player]['m_score'],
-        'mwp': player_data[player]['mwp'],
-        'g_score': player_data[player]['g_score'],
-        'gwp': player_data[player]['gwp'],
-        'played_ids': player_data[player]['played_ids'],
-        'omwp': player_data[player]['omwp'],
-        'ogwp': player_data[player]['ogwp'],
-        'record': player_data[player]['record']
-      };
-      player_array.push(data);
-    }
-    //sort player_array by match score, then omwp, then game score, then ogwp
-    player_array.sort(function (a, b) {
-      return b.m_score - a.m_score || b.omwp - a.omwp || b.g_score - a.g_score || b.ogwp - a.ogwp;
-    });
-    //setup other variables
-    var last_m_score = 10000;
-    var last_omwp = 1;
-    var last_g_score = 10000;
-    var last_ogwp = 1;
-    if (!round) {
-      var round = 0;
-    }
-    var standings_text = `Round ${round} standings:\n`;
-    var placement = 1;
-    var players_since_last_placement = 0;
-    //make output
-    for (let player in player_array) {
-      var name = player_array[player]['name'];
-      var player_id = player_array[player]['player_id'];
-      var deck_name = player_array[player]['deck_name'];
-      var m_score = player_array[player]['m_score'];
-      var omwp = player_array[player]['omwp'];
-      var g_score = player_array[player]['g_score'];
-      var ogwp = player_array[player]['ogwp'];
-      var record = player_array[player]['record'];
-      if (m_score < last_m_score) {
-        last_m_score = m_score;
-        last_omwp = omwp;
-        last_g_score = g_score;
-        last_ogwp = ogwp;
-        placement += players_since_last_placement;
-        players_since_last_placement = 1;
-      } else if (omwp < last_omwp){
-        last_omwp = omwp;
-        last_g_score = 10000;
-        last_ogwp = 1;
-        placement += players_since_last_placement;
-        players_since_last_placement = 1;;
-      } else if (g_score < last_g_score) {
-        last_g_score = g_score;
-        last_ogwp = 1;
-        placement += players_since_last_placement;
-        players_since_last_placement = 1;
-      } else if (ogwp < last_ogwp) {
-        last_ogwp = ogwp;
-        placement += players_since_last_placement;
-        players_since_last_placement = 1;
-      } else {
-        players_since_last_placement += 1;
-      }
-      var format_l = '';
-      var format_r = '';
-      if (name) {
-        var format_l = ' (';
-        var format_r = ')';
-      }
-      if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
-        var deck_link = player_array[player]['deck_link'];
-        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} on [${deck_name}](<${deck_link}>) (${record})`;
-      } else {
-        standings_text += `\n${placement} - ${name}${format_l}<@${player_id}>${format_r} (${record})`;
-      }
+      */
+      default:
+        standings_text = 'Unknown elimination style';
     }
     return standings_text;
   } catch (error) {
     console.log(error);
-    var RETURN_CONTENT = 'Error occured in close function.';
+    var RETURN_CONTENT = 'Error occured in standings function.';
     var time = new Date();
     await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
     return RETURN_CONTENT;
@@ -696,9 +814,16 @@ export async function reopen(input) {
     let env = input.env;
     let interaction = input.interaction;
     let tournament_id = interaction.guild_id + interaction.channel_id;
-    //close registration
+    //reopen registration
     await env.DB.prepare('UPDATE ongoing_tournaments SET open = ? WHERE id = ?').bind('true', tournament_id).run();
-    return `<@${interaction.member.user.id}> reopened tournament registration.`;
+    var ongoing_tournaments_fetch = await env.DB.prepare('SELECT t_name FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+    var t_name = ongoing_tournaments_fetch['results'][0]['t_name'];
+    if (t_name) {
+      var name_placeholder = ` for the ${t_name} tournament.`;
+    } else {
+      var name_placeholder = `.`;
+    }
+    return `<@${interaction.member.user.id}> reopened tournament registration${name_placeholder}`;
   } catch (error) {
     console.log(error);
     var RETURN_CONTENT = 'Error occured in reopen function.';
@@ -956,29 +1081,60 @@ export async function process_register_modals(input) {
       components_data[interaction.data['components'][i]['components'][0]['custom_id']] = interaction.data['components'][i]['components'][0]['value'];
     }
     var name = components_data['modal_name'];
+    var pronouns = components_data['modal_pronouns'];
     var deck_name = components_data['modal_deck_name'];
     if (components_data['modal_decklist']) {
-      var deck_link = components_data['modal_decklist'];
-      if (!deck_link.startsWith('https://www.')) {
-        return 'Error: Decklink must be a url.';
+      var input_link = components_data['modal_decklist'];
+      if (!input_link.startsWith('https://www.moxfield.com/decks/')) {// && !deck_link.startsWith('https://archidekt.com/decks/') && !deck_link.startsWith('https://tappedout.net/mtg-decks/')) {
+        return 'Error: Decklink must be a moxfield url. Support for archidekt and tappedout is planned but not currently functional.';
       }
     } else {
-      var deck_link = '';
+      var input_link = '';
     }
     //if player already registered for this channel, update, else, insert; also send confirmation message
-    var players_fetch = await env.DB.prepare('SELECT player_id FROM players WHERE player_id = ? AND tournament_id = ?').bind(target_id, tournament_id).all();
+    var players_fetch = await env.DB.prepare('SELECT player_id, deck_link FROM players WHERE player_id = ? AND tournament_id = ?').bind(target_id, tournament_id).all();
+    var deck_link_text = '';
     if (players_fetch['results'].length > 0) {
-      await env.DB.prepare('UPDATE players SET deck_name = ?, deck_link = ?, name = ?, dropped = NULL WHERE player_id = ? AND tournament_id = ?').bind(deck_name, deck_link, name, target_id, tournament_id).run();
+      await env.DB.prepare('UPDATE players SET deck_name = ?, name = ?, pronouns = ?, dropped = NULL WHERE player_id = ? AND tournament_id = ?').bind(deck_name, name, pronouns, target_id, tournament_id).run();
+      if (input_link && input_link != players_fetch['results'][0]['deck_link']) {
+        await env.DB.prepare('UPDATE players SET input_link = ?, deck_link = NULL WHERE player_id = ? AND tournament_id = ?').bind(input_link, target_id, tournament_id).run();
+        deck_link_text = ' Grabbing decklist...'
+      }
       if (target_id != interaction.member.user.id) {
-        return `<@${interaction.member.user.id}> updated <@${target_id}>'s registration!`;
-      }  
-      return `<@${target_id}> updated their tournament registration!`;
+        var output_text = `<@${interaction.member.user.id}> updated <@${target_id}>'s registration!${deck_link_text}`;
+      } else {
+        var output_text = `<@${target_id}> updated their tournament registration!${deck_link_text}`;
+      }
+      if (deck_link_text != '') {
+        var queue = await env.TBQ.send({
+          f_call: 'duplicate',
+          deck_link: input_link,
+          interaction: interaction,
+          target_id: target_id,
+          output_text: output_text
+        });
+      }
+      return output_text;
     } else {
-      await env.DB.prepare('INSERT INTO players (player_id, tournament_id, deck_name, deck_link, m_score, g_score, name) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(target_id, tournament_id, deck_name, deck_link, 0, 0, name).run();
+      await env.DB.prepare('INSERT INTO players (player_id, tournament_id, deck_name, input_link, m_score, g_score, name, pronouns) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(target_id, tournament_id, deck_name, input_link, 0, 0, name, pronouns).run();
+      if (input_link) {
+        deck_link_text = ' Grabbing decklist...'
+      }
       if (target_id != interaction.member.user.id) {
-        return `<@${interaction.member.user.id}> registered <@${target_id}> for the tournament!`;
-      } 
-      return`<@${target_id}> registered for the tournament!`;
+        var output_text = `<@${interaction.member.user.id}> registered <@${target_id}> for the tournament!${deck_link_text}`;
+      } else {
+        var output_text = `<@${target_id}> registered for the tournament!${deck_link_text}`;  
+      }
+      if (deck_link_text != '') {
+        var queue = await env.TBQ.send({
+          f_call: 'duplicate',
+          deck_link: input_link,
+          interaction: interaction,
+          target_id: target_id,
+          output_text: output_text
+        });
+      }
+      return output_text;
     }
   } catch (error) {
     console.log(error);
@@ -1014,12 +1170,12 @@ export async function process_drop_modals(input) {
         var target_is_p1 = true;
         var target_report_field = 'record_p1';
         var opp_report_field = 'record_p2';
-        var opponent = report_fetch['results'][0]['player_one'];
+        var opponent = report_fetch['results'][0]['player_two'];
       } else {
         var target_is_p1 = false;
         var target_report_field = 'record_p2';
         var opp_report_field = 'record_p1';
-        var opponent = report_fetch['results'][0]['player_two'];
+        var opponent = report_fetch['results'][0]['player_one'];
       }
       //if player and opponent haven't reported for round, set their round record to 0-2 and opponent's to 2-0
       if (!report_fetch['results'][0]['record_p1'] && !report_fetch['results'][0]['record_p2']) {
@@ -1109,13 +1265,14 @@ export async function process_end_modal(input) {
     var interaction = input.interaction;  
     var tournament_id = interaction.guild_id + interaction.channel_id;
     //setup round variable for later in function
-    var ongoing_tournaments_fetch = await env.DB.prepare('SELECT open, round, decklist_pub FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+    var ongoing_tournaments_fetch = await env.DB.prepare('SELECT open, round, decklist_pub, elim_style FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
     var round = ongoing_tournaments_fetch['results'][0]['round'];
     if (!round) {
       round = 0;
     }
+    var elim_style = ongoing_tournaments_fetch['results'][0]['elim_style'];
     //record points in players
-    if (round > 0) {
+    if (round > 0 && elim_style.toLowerCase() == 'swiss') {
       //get players and current score
       var pre_score_fetch = await env.DB.prepare('SELECT player_id, m_score, mwp, g_score, gwp, played_ids FROM players WHERE tournament_id = ?').bind(tournament_id).all();
       var pre_score = {};
@@ -1153,7 +1310,7 @@ export async function process_end_modal(input) {
           var w_l_d = round_results[player].split('-');  
         } catch (error) {
           //I can't remember why I needed to put this in and it's definitely not a great way to handle whatever bug I was running into
-          ////to-do: take this out??
+          ////to-do: take this out
           continue;
         }
         var round_wins = Number(w_l_d[0]);
@@ -1199,7 +1356,7 @@ export async function process_end_modal(input) {
     var time = new Date();
     var time_string = time.toString();
     //move from ongoing_tournaments
-    await env.DB.prepare('INSERT INTO temp_tournaments (id, open, round, decklist_req, decklist_pub, elim_style, t_format, swaps, swaps_pub, swaps_balanced) SELECT id, open, round, decklist_req, decklist_pub, elim_style, t_format, swaps, swaps_pub, swaps_balanced FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).run();
+    await env.DB.prepare('INSERT INTO temp_tournaments (id, open, round, decklist_req, decklist_pub, elim_style, t_format, swaps, swaps_pub, swaps_balanced, t_name ,to_moxfield) SELECT id, open, round, decklist_req, decklist_pub, elim_style, t_format, swaps, swaps_pub, swaps_balanced, t_name ,to_moxfield FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).run();
     await env.DB.prepare('UPDATE temp_tournaments SET archival_time = ?').bind(time_string).run();
     await env.DB.prepare('INSERT INTO archive_tournaments SELECT * from temp_tournaments').run();
     await env.DB.prepare('DELETE FROM temp_tournaments').run();
@@ -1209,7 +1366,7 @@ export async function process_end_modal(input) {
     await env.DB.prepare('INSERT INTO archive_pairings SELECT * from temp_pairings').run();
     await env.DB.prepare('DELETE FROM temp_pairings').run();
     //move from players
-    await env.DB.prepare('INSERT INTO temp_players (player_id, tournament_id, deck_name, deck_link, played_ids, m_score, mwp, g_score, gwp, received_bye, name, dropped) SELECT player_id, tournament_id, deck_name, deck_link, played_ids, m_score, mwp, g_score, gwp, received_bye, name, dropped FROM players WHERE tournament_id = ?').bind(tournament_id).run();
+    await env.DB.prepare('INSERT INTO temp_players (player_id, tournament_id, deck_name, deck_link, played_ids, m_score, mwp, g_score, gwp, received_bye, name, dropped, eliminated) SELECT player_id, tournament_id, deck_name, deck_link, played_ids, m_score, mwp, g_score, gwp, received_bye, name, dropped, eliminated FROM players WHERE tournament_id = ?').bind(tournament_id).run();
     await env.DB.prepare('UPDATE temp_players SET archival_time = ?').bind(time_string).run();
     await env.DB.prepare('INSERT INTO archive_players SELECT * from temp_players').run();
     await env.DB.prepare('DELETE FROM temp_players').run();
@@ -1217,6 +1374,7 @@ export async function process_end_modal(input) {
     await env.DB.prepare('DELETE FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).run();
     await env.DB.prepare('DELETE FROM pairings WHERE tournament_id = ?').bind(tournament_id).run();
     await env.DB.prepare('DELETE FROM players WHERE tournament_id = ?').bind(tournament_id).run();
+    await env.DB.prepare('DELETE FROM temp_to WHERE tournament_id = ?').bind(tournament_id).run();
     //return confirmation
     var RETURN_CONTENT = `<@${interaction.member.user.id}> ended the tournament. Data was successfully archived. Final standings:\n\n`;
     RETURN_CONTENT += standings_output;
@@ -1274,6 +1432,15 @@ export async function process_swaps_modal(input) {
   }
 }
 
+export async function nthIndex(str, pat, n){
+  var L= str.length, i= -1;
+  while(n-- && i++<L){
+    i= str.indexOf(pat, i);
+    if (i < 0) break;
+  }
+  return i;
+}
+
 export async function send_output(input) {
   try {
     //unpack input
@@ -1287,10 +1454,15 @@ export async function send_output(input) {
     if (input.mentions) {
       mentions = input.mentions;
     }
-    if (message.length < 2000) {
+    var at_ten = await nthIndex(message, '@', 10);
+    var newline_after_at_ten = -1;
+    if (at_ten != -1) {
+      newline_after_at_ten = message.indexOf('\n', at_ten);
+    }
+    if (message.length < 2000 && newline_after_at_ten === -1) {
       if (edit_url) {
-        let res = await axios.patch(edit_url, {content: message, allowed_mentions: {parse: mentions}});
-        return;
+        await axios.patch(edit_url, {content: message, allowed_mentions: {parse: mentions}});
+        return 'success';
       }
       await fetch(`https://discord.com/api/v10/channels/${interaction.channel_id}/messages`, {
         headers: {
@@ -1308,11 +1480,14 @@ export async function send_output(input) {
     //cut input at first newline before 2000th character, repeat until length > 2000, send first as a patch and remaining as new message
     var message_array = [];
     var i = 0;
-    while (message.length > 2000) {
-      let test_str = message.substr(0, 2000);
+    while (message.length > 2000 || newline_after_at_ten > 0) {
+      let cut_at = (newline_after_at_ten < 2000) ? newline_after_at_ten:2000;
+      let test_str = message.substr(0, cut_at);
       let index = test_str.lastIndexOf('\n');
       message_array[i] = test_str.substr(0, index);
       message = message.substr(index);
+      var at_ten = await nthIndex(message, '@', 10);
+      var newline_after_at_ten = message.indexOf('\n', at_ten);
       i++;
     }
     message_array[i] = message;
@@ -1321,7 +1496,7 @@ export async function send_output(input) {
       let res = await axios.patch(edit_url, {content: message_array[0], allowed_mentions: {parse: mentions}});
       start++;
     }
-    for (let i = start; i < message.length; i++) {
+    for (let i = start; i < message_array.length; i++) {
       var res_1 = await fetch(`https://discord.com/api/v10/channels/${interaction.channel_id}/messages`, {
         headers: {
           'Content-Type': 'application/json',
@@ -1334,7 +1509,7 @@ export async function send_output(input) {
             })
       });
     }
-    return;
+    return;   
   } catch (error) {
     console.log(error);
     var RETURN_CONTENT = 'Error occured in send_output function.';
@@ -1351,7 +1526,7 @@ export async function process_feedback_modal(input) {
     let interaction = input.interaction;
     let tournament_id = interaction.guild_id + interaction.channel_id;
     //send feedback message to feedback channel
-    await fetch(`https://discord.com/api/v10/channels/<TESTING_CHANNEL_ID>/messages`, {
+    await fetch(`https://discord.com/api/v10/channels/<REMOVED>/messages`, {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bot ${env.DISCORD_TOKEN}`,
@@ -1390,13 +1565,74 @@ export async function migrate(input) {
         },
         method: 'POST',
         body: JSON.stringify({
-              content: `<@${interaction.member.user.id}> moced a tournament into this channel!`
+              content: `<@${interaction.member.user.id}> moved a tournament into this channel!`
             })
       });
     return `<@${interaction.member.user.id}> moved tournament to <#${interaction.data.options[0]['value']}>.`;
   } catch (error) {
     console.log(error);
     var RETURN_CONTENT = 'Error occured in reopen function.';
+    var time = new Date();
+    await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
+    return RETURN_CONTENT;
+  }
+}
+
+export async function check_registered(input) {
+  try {
+    //process inputs
+    let env = input.env;
+    let interaction = input.interaction;
+    let tournament_id = interaction.guild_id + interaction.channel_id;
+    //make list of registered players
+    var player_data_fetch = await env.DB.prepare('SELECT player_id, deck_name, deck_link, name, pronouns FROM players WHERE tournament_id = ?').bind(tournament_id).run();
+    var ongoing_tournaments_fetch = await env.DB.prepare('SELECT decklist_pub FROM ongoing_tournaments WHERE id = ?').bind(tournament_id).all();
+    var guildUrl = `https://discord.com/api/v10/guilds/${interaction.guild_id}`
+    var response = await fetch(guildUrl, {
+      headers: {
+        Authorization: `Bot ${env.DISCORD_TOKEN}`,
+      }, 
+      method:'GET',
+    });
+    var guild_data = await response.json();
+    var player_list = `Users registered for the tournament in the ${interaction.channel.name} channel of the ${guild_data.name} server:`;
+    for (let i = 0; i < player_data_fetch['results'].length; i++) {
+      var p_name = player_data_fetch['results'][i]['name'];
+      var format_p_l = '';
+      var format_p_r = '';
+      if (p_name) {
+        var format_p_l = ' (';
+        var format_p_r = ')';
+      }
+      var p = player_data_fetch['results'][i]['player_id'];
+      if (p_name && player_data_fetch['results'][i]['pronouns']) {
+        p_name += ` (${player_data_fetch['results'][i]['pronouns']})`;
+      } else if (player_data_fetch['results'][i]['pronouns']) {
+        format_p_r += ` (${player_data_fetch['results'][i]['pronouns']})`;
+      }
+      if (ongoing_tournaments_fetch['results'][0]['decklist_pub'] == 'true') {
+        var p_deck_name = player_data_fetch['results'][i]['deck_name'];
+        var p_deck_link = player_data_fetch['results'][i]['deck_link'];
+        player_list += `\n${p_name}${format_p_l}<@${p}>${format_p_r} on [${p_deck_name}](<${p_deck_link}>)`;
+      } else {
+        player_list += `\n${p_name}${format_p_l}<@${p}>${format_p_r}`;
+      }
+    }
+    //create DM with calling user
+    var result = await axios.post('https://discord.com/api/v10/users/@me/channels', {
+      recipient_id: interaction.member.user.id}, 
+      {headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bot ${env.DISCORD_TOKEN}`,
+      }});
+    //send list via DM (use send_output function)
+    var input = {message: player_list, interaction: interaction, env: env};
+    input.interaction.channel_id = result.data.id;
+    await send_output(input);
+    return `Successfully sent list of registered users via DM.`;
+  } catch (error) {
+    console.log(error);
+    var RETURN_CONTENT = 'Error occured in check_registered function.';
     var time = new Date();
     await env.DB.prepare('INSERT INTO errors (error, description, time) VALUES (?, ?, ?)').bind(RETURN_CONTENT, error['message'], time.toString()).run();
     return RETURN_CONTENT;

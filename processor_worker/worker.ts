@@ -8,10 +8,9 @@ import {
 import axios from 'axios';
 import {
   pair,
-  open,
+  process_open_modal,
   close,
   pairing,
-  report,
   missing_results,
   standings,
   reopen,
@@ -26,8 +25,14 @@ import {
   temp_to_check,
   send_output,
   process_feedback_modal,
-  migrate
+  migrate,
+  check_registered,
+  process_report_modals
 } from './processing_functions.js'
+
+interface Env {
+  DB: D1Database;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -40,14 +45,6 @@ export default {
     var edit_url = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${interaction.token}/messages/@original`;
     if (interaction.type === InteractionType.APPLICATION_COMMAND) {
       switch (interaction.data.name.toLowerCase()) {
-        case 'open': {
-          var input = {
-            'env': env,
-            'interaction': interaction
-          }
-          var output = await open(input);
-          break;
-        }
         case 'close': {
           var input = {
             'env': env,
@@ -59,7 +56,7 @@ export default {
         case 'pair': {
           var input = {
             'env': env,
-            'tournament_id': interaction.guild_id + interaction.channel_id
+            'interaction': interaction
           };
           var mentions = ['users'];
           var output = await pair(input);
@@ -71,14 +68,6 @@ export default {
             'interaction': interaction
           };
           var output = await pairing(input);
-          break;
-        }
-        case 'report': {
-          var input = {
-            'env': env,
-            'interaction': interaction
-          };
-          var output = await report(input);
           break;
         }
         case 'missing_results': {
@@ -126,22 +115,20 @@ export default {
           var output = await autoreport(input);
           break;
         }
-        case 'report_other': {
-          var input = {
-            'env': env,
-            'interaction': interaction,
-            'target': interaction.data.options[0]['value']
-          };
-          var mentions = ['users'];
-          var output = await report(input);
-          break;
-        }
         case 'migrate': {
           var input = {
             'env': env,
             'interaction': interaction
           }
           var output = await migrate(input);
+          break;
+        }
+        case 'check_registered': {
+          var input = {
+            'env': env,
+            'interaction': interaction
+          }
+          var output = await check_registered(input);
           break;
         }
         default:
@@ -160,6 +147,14 @@ export default {
     }
     if (interaction.type === InteractionType.MODAL_SUBMIT) {
       switch (interaction.data.custom_id.toLowerCase()) {
+        case 'slash_open_modal': {
+          var input = {
+            'env': env,
+            'interaction': interaction
+          }
+          var output = await process_open_modal(input);
+          break;
+        }
         case 'slash_set_defaults_modal': {
           var input = {
             'env': env,
@@ -246,6 +241,29 @@ export default {
           var output = await process_feedback_modal(input);
           break;
         }
+        case 'slash_report_modal': {
+          var input = {
+            'env': env,
+            'interaction': interaction
+          }
+          var output = await process_report_modals(input);
+          break;
+        }
+        case 'slash_report_other_modal': {
+          var input = {
+            'env': env,
+            'interaction': interaction,
+            'command': 'report_other'
+          }
+          input.target = await temp_to_check(input);
+          if (input.target == 'Error') {
+            var output = 'An error occured in temp_to_check function.';
+            break;
+          }
+          var mentions = ['users'];
+          var output = await process_report_modals(input);
+          break;
+        }
         default:
           var output = `Error: Unrecognized modal "${interaction.data.custom_id.toLowerCase()}"`;
       }
@@ -261,4 +279,4 @@ export default {
       await send_output(send);
     }
   },
-};
+} satisfies ExportedHandler<Env>;

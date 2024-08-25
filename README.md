@@ -1,5 +1,5 @@
 # TOB(y)
-Tournament Organizer Bot, TOB(y), is a discord bot intended to reduce TO administrative overhead by handling player registration, pairing, and reporting. TOB(y) identifies tournaments by channel id so a server can have multiple ongoing tournaments. The bot is powered by two CloudFlare workers, one taking in the requests from discord (server_worker) and another creating responses to requests and maintaining a related database (processor_worker).
+Tournament Organizer Bot, TOB(y), is a discord bot intended to reduce TO administrative overhead by handling player registration, pairing, and reporting. TOB(y) identifies tournaments by channel id so a server can have multiple ongoing tournaments. The bot is powered by three CloudFlare workers, one taking in the requests from discord (server_worker), another creating responses to requests and maintaining a related database (processor_worker), and a third that handles Moxfield-related automations (browser_worker).
 
 # Using TOB(y)
 Add TOB(y) to your server [here](https://discord.com/oauth2/authorize?client_id=1253129653250424873&permissions=2147485696&integration_type=0&scope=applications.commands+bot).
@@ -27,6 +27,7 @@ Other available commands:
 - /register_other: (TO) register user for tournament
 - /feedback: send feedback message to public testing server
 - /migrate: (TO) move tournament from current channel to another
+- /check_registered: (TO) sends a list of registered players via DM
 
 Only available in testing servers:
 
@@ -36,16 +37,6 @@ Only available in testing servers:
 - /autoreport: (TESTING) matches opponent's match report or generates random match reports for all unreported players
 
 # Features Coming Soon
-Implemented:
-- /check_registered: (TO) sends a list of registered players via DM (implemented in live version)
-- Make /standings error if called before registration closed (implemented in live version)
-- Change /report and /report_other into modals (forms) instead of using parameters (implemented in live version)
-- Change setup, register, and swap modals to default to existing settings or submission, if any (implemented in live version for all modals/forms except end and drop)
-- TO tools to view and modify a player's registration, reporting, and swaps (accomplished through above modal change combined with existing "_other" commands)
-- Fix guild name issue in /check_registered (implemented in live version)
-- Automate deck duplication (implemented in live version)
-- Privacy statement (some identifying player data is retained when archived, this can be removed upon request)
-
 Planned:
 - Option to create pairings upon using /close
 - Code errors send message to private testing server

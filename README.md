@@ -70,6 +70,7 @@ Other commands:
 
 # Features Coming Soon
 Planned:
+- Automated backup of database and logs
 - Change setup commands to a view rather than a modal, allowing for up to 25 drop-down menus to establish tournament settings over current five-per-command limitation
 - Code errors send message to private testing server
 - Make /migrate send an error when it can't move tournament to target channel due to permissions or other difficulty accessing channel

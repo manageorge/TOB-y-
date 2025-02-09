@@ -5,6 +5,7 @@ import logging
 import random
 from operator import itemgetter
 import json
+import traceback
 
 #installed modules
 import requests
@@ -30,6 +31,8 @@ import networkx as nx
 ##implement aiohttp
 ##consider implementing aiologger
 
+live = False
+
 #setup logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -39,6 +42,17 @@ logger.addHandler(handler)
 
 #load all the variables from the env file
 load_dotenv() 
+user_agent = os.getenv('USER_AGENT')
+if not live:
+    bot_token = os.getenv('TEST_TOKEN')
+    test_channels = [os.getenv('MBTS')]
+    feedback_channel = os.getenv('TEST_FEEDBACK_CHANNEL')
+    log_channel_id = os.getenv('TEST_LOG_CHANNEL')
+else:
+    bot_token = os.getenv('TOBY_TOKEN')
+    test_channels = [os.getenv('MBTS'), os.getenv('TBYTS')]
+    feedback_channel = os.getenv('FEEDBACK_CHANNEL')
+    log_channel_id = os.getenv('LOG_CHANNEL')
 bot = discord.Bot()
 
 #bot events
@@ -48,7 +62,7 @@ async def on_ready():
     print(f'{bot.user} loaded!')
 
 #views
-class playerView(discord.ui.View):
+class PlayerView(discord.ui.View):
     def __init__(self):
         super().__init__()
 
@@ -239,7 +253,7 @@ class ReportOtherInputView(discord.ui.View):
     async def report_other_input_callback(self, select, interaction):
         await report_other(interaction, select.values[0])
 
-class endConfirmView(discord.ui.View):
+class EndConfirmView(discord.ui.View):
     @discord.ui.button(label = 'End Anyways', style = discord.ButtonStyle.primary)
     async def end_anyways_callback(self, button, interaction):
         logger.info(f'/end: {interaction.user}: end anyways button pressed')
@@ -256,7 +270,7 @@ class endConfirmView(discord.ui.View):
         await interaction.response.defer(ephemeral = True)
         await interaction.delete_original_response()
 
-class adminView(discord.ui.View):
+class AdminView(discord.ui.View):
     @discord.ui.button(label = 'Testing', style = discord.ButtonStyle.primary, row = 0)
     async def testing_callback(self, button, interaction):
         logger.info(f'admin dashboard: {interaction.user}: testing button pressed')
@@ -325,7 +339,7 @@ class setupModal(discord.ui.Modal):
             await interaction.respond(f'<@{interaction.user.id}> updated tournament defaults for this channel (settings for any ongoing tournament were not changed).')
             self.logger.info(f'/setup: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class setupSwapsModal(discord.ui.Modal):
     def __init__(self, logger, ctx, res, cur, conn, *args, **kwargs) -> None:
@@ -373,7 +387,7 @@ class setupSwapsModal(discord.ui.Modal):
             await interaction.respond(f'<@{interaction.user.id}> updated swap defaults for this channel (settings for any ongoing tournament were not changed).')
             self.logger.info(f'/setup_swaps: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class registerModal(discord.ui.Modal):
     def __init__(self, logger, ctx, res_players, cur, conn, *args, **kwargs) -> None:
@@ -393,11 +407,14 @@ class registerModal(discord.ui.Modal):
             #check decklink
             input_link = ''
             if len(self.children) > 3:
-                if not self.children[3].value.startswith('https://www.moxfield.com/decks/'):
+                if not (self.children[3].value.startswith('https://www.moxfield.com/decks/') or self.children[3].value.startswith('https://moxfield.com/decks/')):
                     await interaction.respond('Error: Decklink must be a moxfield url.')
                     self.logger.info(f'/register: {self.ctx.user}: decklink not moxfield')
                     return
-                input_link = self.children[3].value
+                if self.children[3].value.startswith('https://moxfield.com/decks/'):
+                    input_link = self.children[3].value.replace('https://', 'https://www.')
+                else:
+                    input_link = self.children[3].value
                 if self.res_players and self.res_players[3] and self.res_players[3] == input_link:
                     input_link = self.res_players[4]
             deck_name = ''
@@ -425,17 +442,17 @@ class registerModal(discord.ui.Modal):
                     long_deck_name += f' - {res_ot[0]}'
                 if len(long_deck_name) > 100:
                     long_deck_name = long_deck_name[:99]
-                deck_link = duplicate(input_link.replace('https://www.moxfield.com/decks/', ''), long_deck_name)
+                deck_link, deck_id = duplicate(input_link.replace('https://www.moxfield.com/decks/', ''), long_deck_name)
                 if not deck_link:
                     await msg.edit(msg.content + ' Failed to duplicate decklist.')
-                    self.logger.info(f'/register: {self.ctx.user}: failed to duplicate decklist, exited early')
+                    self.logger.info(f'/register: {self.ctx.user}: failed to duplicate decklist')
                     return
-                self.cur.execute('UPDATE players SET deck_link = ? WHERE p_id = ? AND t_id = ?', (deck_link, self.ctx.user.id, self.ctx.channel_id))
+                self.cur.execute('UPDATE players SET deck_link = ?, deck_id = ? WHERE p_id = ? AND t_id = ?', (deck_link, deck_id, self.ctx.user.id, self.ctx.channel_id))
                 await msg.edit(msg.content + ' Decklist duplicated!')
             self.conn.commit()
             self.logger.info(f'/register: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class registerOtherModal(discord.ui.Modal):
     def __init__(self, logger, ctx, res_players, cur, conn, player, *args, **kwargs) -> None:
@@ -461,7 +478,7 @@ class registerOtherModal(discord.ui.Modal):
                     self.logger.info(f'/register: {self.ctx.user}: decklink not moxfield')
                     return
                 input_link = self.children[3].value
-                if self.res_players[3] and self.res_players[3] == input_link:
+                if self.res_players and self.res_players[3] and self.res_players[3] == input_link:
                     input_link = self.res_players[4]
             deck_name = ''
             if len(self.children) > 2:
@@ -488,17 +505,17 @@ class registerOtherModal(discord.ui.Modal):
                     long_deck_name += f' - {res_ot[0]}'
                 if len(long_deck_name) > 100:
                     long_deck_name = long_deck_name[:99]
-                deck_link = duplicate(input_link.replace('https://www.moxfield.com/decks/', ''), long_deck_name)
+                deck_link, deck_id = duplicate(input_link.replace('https://www.moxfield.com/decks/', ''), long_deck_name)
                 if not deck_link:
                     await msg.edit(msg.content + ' Failed to duplicate decklist.')
-                    self.logger.info(f'/register: {self.ctx.user}: failed to duplicate decklist, exited early')
+                    self.logger.info(f'/register: {self.ctx.user}: failed to duplicate decklist')
                     return
-                self.cur.execute('UPDATE players SET deck_link = ? WHERE p_id = ? AND t_id = ?', (deck_link, self.player.id, self.ctx.channel_id))
+                self.cur.execute('UPDATE players SET deck_link = ?, deck_id = ? WHERE p_id = ? AND t_id = ?', (deck_link, deck_id, self.player.id, self.ctx.channel_id))
                 await msg.edit(msg.content + ' Decklist duplicated!')
             self.conn.commit()
             self.logger.info(f'/register: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class openModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, *args, **kwargs) -> None:
@@ -520,11 +537,11 @@ class openModal(discord.ui.Modal):
             #check for entry in tournament_defaults table, make new entry if none, create entry in ongoing_tournaments
             res = self.cur.execute('SELECT decklist_req, decklist_pub, swaps, swaps_pub, swaps_balanced, sb_swaps, elim_style, t_format FROM tournament_defaults WHERE id = ?', (self.ctx.channel_id, )).fetchone()
             if not res:
-                decklist_req = 'false'
-                decklist_pub = 'false'
+                decklist_req = 'n'
+                decklist_pub = 'n'
                 swaps = 0
-                swaps_pub = 'false'
-                swaps_balanced = 'true'
+                swaps_pub = 'n'
+                swaps_balanced = 'y'
                 elim_style = 'swiss'
                 t_format = 'unknown'
                 self.cur.execute('INSERT INTO tournament_defaults (id, server_name, channel_name) VALUES (?, ?, ?)', (self.ctx.channel_id, self.ctx.guild.name, self.ctx.channel.name))
@@ -543,15 +560,15 @@ class openModal(discord.ui.Modal):
                 self.conn.commit()
             #create tournament announcement
             announce_deck = ''
-            if decklist_req == 'true':
-                if decklist_pub == 'true':
+            if decklist_req == 'y':
+                if decklist_pub == 'y':
                     announce_deck = ' Decklists are required and public.'
                 else:
                     announce_deck = ' Decklists are required.'
             announce_swaps = ''
             if swaps > 0:
                 announce_swaps = f' {str(swaps)} swaps are allowed per round.'
-                if swaps_pub == 'true':
+                if swaps_pub == 'y':
                     announce_swaps += ' Swaps are public.'
                 else:
                     announce_swaps += ' Swaps are not public until deck changes are made.'
@@ -562,7 +579,7 @@ class openModal(discord.ui.Modal):
             self.logger.info(f'/open: {interaction.user}: processed modal response')
             return 
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class dropModal(discord.ui.Modal):
     def __init__(self, logger, ctx, res, cur, conn, *args, **kwargs) -> None:
@@ -581,6 +598,7 @@ class dropModal(discord.ui.Modal):
             #defering after initial error check to allow error to be ephemeral
             if not (self.children[0].value.lower() == 'drop' and self.children[0].value.lower() == 'drop'):
                 await interaction.respond('Error: Drop confirmation failed. Both fields must match "drop" (without quotes).', ephemeral = True)
+                self.logger.info(f'/drop: {interaction.user}: modal confirmation failed')
                 return
             await interaction.response.defer()
             pairings_fetch = self.cur.execute('SELECT opponent_id, wins, losses, draws FROM pairings WHERE p_id = ? AND t_id = ? AND round = ?', (interaction.user.id, interaction.channel_id, self.res[1])).fetchone()
@@ -589,6 +607,7 @@ class dropModal(discord.ui.Modal):
                 self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (0, interaction.user.id, interaction.channel_id))
                 self.conn.commit()
                 await interaction.respond(f'<@{interaction.user.id}> dropped from the tournament.')
+                self.logger.info(f'/drop: {interaction.user}: processed modal response')
                 return
             if pairings_fetch[1] is None:
                 #None = NULL, should only be None if player hasn't reported
@@ -598,6 +617,7 @@ class dropModal(discord.ui.Modal):
                     self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], interaction.user.id, interaction.channel_id))
                     self.conn.commit()
                     await interaction.respond(f'<@{interaction.user.id}> dropped from the tournament. Unable to find opponent in pairings, TO may need to report for <@{interaction.user.id}>.')
+                    self.logger.info(f'/drop: {interaction.user}: processed modal response')
                     return
                 if opponent_fetch[1] is None:
                     #give 2-0 to opponent if neither have reported
@@ -609,11 +629,13 @@ class dropModal(discord.ui.Modal):
                     self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], interaction.user.id, interaction.channel_id))
                     self.conn.commit()
                     await interaction.respond(f"<@{interaction.user.id}> dropped from the tournament. As match results haven't been reported, <@{pairings_fetch[0]}> was given a 2-0 for the round. If this is incorrect, contact TO to override.")
+                    self.logger.info(f'/drop: {interaction.user}: processed modal response')
                     return
                 #if only opponent reported, mirror opponent's reported record
                 self.cur.execute('UPDATE pairings SET wins = ?, losses = ?, draws = ? WHERE p_id = ? AND t_id = ? AND round = ?', (opponent_fetch[2], opponent_fetch[1], opponent_fetch[3], interaction.user.id, interaction.channel_id, self.res[1]))
                 self.conn.commit()
                 await interaction.respond(f"<@{interaction.user.id}> dropped from the tournament. As they hadn't reported, <@{pairings_fetch[0]}>'s match report was confirmed.")
+                self.logger.info(f'/drop: {interaction.user}: processed modal response')
                 return
             #if player has reported
             self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], interaction.user.id, interaction.channel_id))
@@ -621,7 +643,7 @@ class dropModal(discord.ui.Modal):
             await interaction.respond(f'<@{interaction.user.id}> dropped from the tournament.')
             self.logger.info(f'/drop: {interaction.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class dropOtherModal(discord.ui.Modal):
     def __init__(self, logger, ctx, res, cur, conn, player, *args, **kwargs) -> None:
@@ -641,6 +663,7 @@ class dropOtherModal(discord.ui.Modal):
             #defering after initial error check to allow error to be ephemeral
             if not (self.children[0].value.lower() == 'drop' and self.children[0].value.lower() == 'drop'):
                 await interaction.respond('Error: Drop confirmation failed. Both fields must match "drop" (without quotes).', ephemeral = True)
+                self.logger.info(f'/drop_other: {interaction.user}: modal confirmation failed')
                 return
             await interaction.response.defer()
             pairings_fetch = self.cur.execute('SELECT opponent_id, wins, losses, draws FROM pairings WHERE p_id = ? AND t_id = ? AND round = ?', (self.player.id, interaction.channel_id, self.res[1])).fetchone()
@@ -649,6 +672,7 @@ class dropOtherModal(discord.ui.Modal):
                 self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (0, self.player.id, interaction.channel_id))
                 self.conn.commit()
                 await interaction.respond(f'<@{interaction.user.id}> dropped <@{self.player.id}> from the tournament.')
+                self.logger.info(f'/drop_other: {interaction.user}: processed modal response')
                 return
             if pairings_fetch[1] is None:
                 #None = NULL, should only be None if player hasn't reported
@@ -658,6 +682,7 @@ class dropOtherModal(discord.ui.Modal):
                     self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], self.player.id, interaction.channel_id))
                     self.conn.commit()
                     await interaction.respond(f'<@{interaction.user.id}> dropped <@{self.player.id}> from the tournament. Unable to find opponent in pairings, TO may need to report for <@{self.player.id}>.')
+                    self.logger.info(f'/drop_other: {interaction.user}: processed modal response')
                     return
                 if opponent_fetch[1] is None:
                     #give 2-0 to opponent if neither have reported
@@ -669,11 +694,13 @@ class dropOtherModal(discord.ui.Modal):
                     self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], self.player.id, interaction.channel_id))
                     self.conn.commit()
                     await interaction.respond(f"<@{interaction.user.id}> dropped <@{self.player.id}> from the tournament. As match results haven't been reported, <@{pairings_fetch[0]}> was given a 2-0 for the round. If this is incorrect, contact TO to override.")
+                    self.logger.info(f'/drop_other: {interaction.user}: processed modal response')
                     return
                 #if only opponent reported, mirror opponent's reported record
                 self.cur.execute('UPDATE pairings SET wins = ?, losses = ?, draws = ? WHERE p_id = ? AND t_id = ? AND round = ?', (opponent_fetch[2], opponent_fetch[1], opponent_fetch[3], player.id, interaction.channel_id, self.res[1]))
                 self.conn.commit()
                 await interaction.respond(f"<@{interaction.user.id}> dropped <@{self.player.id}> from the tournament. As they hadn't reported, <@{pairings_fetch[0]}>'s match report was confirmed.")
+                self.logger.info(f'/drop_other: {interaction.user}: processed modal response')
                 return
             #if player has reported
             self.cur.execute('UPDATE players SET dropped = ? WHERE p_id = ? AND t_id = ?', (self.res[1], self.player.id, interaction.channel_id))
@@ -681,7 +708,7 @@ class dropOtherModal(discord.ui.Modal):
             await interaction.respond(f'<@{interaction.user.id}> dropped <@{self.player.id}> from the tournament.')
             self.logger.info(f'/drop_other: {interaction.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class feedbackModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, *args, **kwargs) -> None:
@@ -696,7 +723,7 @@ class feedbackModal(discord.ui.Modal):
         try:
             self.logger.info(f'/feedback: {self.ctx.user}: received modal response')
             await interaction.response.defer()
-            channel = bot.get_channel(os.getenv('FEEDBACK_CHANNEL'))
+            channel = bot.get_channel(feedback_channel)
             if not channel:
                 await interaction.respond('Error finding feedback channel.')
                 self.logger.info(f"/feedback: {self.ctx.user}: couldn't find feedback channel")
@@ -707,7 +734,7 @@ class feedbackModal(discord.ui.Modal):
             await interaction.respond('Your feedback was sent, thanks!')
             self.logger.info(f'/feedback: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class reportModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, res, res_pairings, res_opponent, *args, **kwargs) -> None:
@@ -755,9 +782,9 @@ class reportModal(discord.ui.Modal):
             if self.children[2].value:
                 output += f'-{self.children[2].value}'
             await interaction.respond(output)
-            self.logger.info(f'/report: {self.ctx.user}: processed modal response')
+            self.logger.info(f'/report: {interaction.user}: processed modal response')
         except Exception as e:
-            self.logger.error(e)
+            await log_exception(e)
 
 class reportOtherModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, res, res_pairings, res_opponent, player, *args, **kwargs) -> None:
@@ -783,16 +810,6 @@ class reportOtherModal(discord.ui.Modal):
     async def callback(self, interaction: discord.Interaction):
         try:
             self.logger.info(f'/report_other: {interaction.user}: received modal response')
-            #check input against opponent record, if exists
-            if not self.res_opponent[1] is None:
-                if (not self.res_opponent[1] == int(self.children[1].value)) or (not self.res_opponent[2] == int(self.children[0].value)) or (self.res_opponent[2] and self.children[2].value and (not self.res_opponent[1] == int(self.children[2].value))):
-                    output = f"Error: Reported record does not match opponent's report. Opponent reported {self.res_opponent[1]}-{self.res_opponent[2]}"
-                    if self.res_opponent[3]:
-                        output += f'-{self.res_opponent[3]}'
-                    output += '. If this is incorrect, contact opponent and/or TO to change their report.'
-                    await interaction.respond(output, ephemeral = True)
-                    self.logger.info(f"/report_other: {interaction.user}: report didn't match")
-                    return "report didn't match"
             await interaction.response.defer()
             #update pairings w/record
             if self.children[2].value:
@@ -800,16 +817,24 @@ class reportOtherModal(discord.ui.Modal):
             else:
                 draws = 0
             cur.execute('UPDATE pairings SET wins = ?, losses = ?, draws = ? WHERE p_id = ? AND t_id = ? AND round = ?', (int(self.children[0].value), int(self.children[1].value), draws, self.player.id, interaction.channel_id, self.res[0]))
-            conn.commit()
             #return confirmation message
             output = f'<@{interaction.user.id}> reported match result: {self.children[0].value}-{self.children[1].value}'
             if self.children[2].value:
                 output += f'-{self.children[2].value}'
             output +=  f'for <@{self.player.id}>'
+            #update opponent's match report, if needed
+            if not self.res_opponent[1] is None:
+                if (not self.res_opponent[1] == int(self.children[1].value)) or (not self.res_opponent[2] == int(self.children[0].value)) or (self.res_opponent[2] and self.children[2].value and (not self.res_opponent[1] == int(self.children[2].value))):
+                    output += f". Overrode <@{self.res_pairings[0]}>'s previous report."
+                    cur.execute('UPDATE pairings SET wins = ?, losses = ?, draws = ? WHERE p_id = ? AND t_id = ? AND round = ?', (int(self.children[1].value), int(self.children[0].value), draws, self.res_pairings[0], interaction.channel_id, self.res[0]))
+            else:
+                output += f'. Matched result for <@{self.res_pairings[0]}>.'
+                cur.execute('UPDATE pairings SET wins = ?, losses = ?, draws = ? WHERE p_id = ? AND t_id = ? AND round = ?', (int(self.children[1].value), int(self.children[0].value), draws, self.res_pairings[0], interaction.channel_id, self.res[0]))
+            conn.commit()
             await interaction.respond(output)
             self.logger.info(f'/report_other: {self.ctx.user}: processed modal response')
         except Exception as e:
-            self.logger.error(e)
+            await log_exception(e)
 
 class swapsModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, res, res_pairings, res_players, *args, **kwargs) -> None:
@@ -856,6 +881,7 @@ class swapsModal(discord.ui.Modal):
             cuts_valid = []
             sb_adds_valid = []
             sb_cuts_valid = []
+            j_deck = ''
             if self.children[0].value:
                 adds_list = self.children[0].value.split('\n')
                 adds_list = [x.lower().strip() for x in adds_list]
@@ -871,8 +897,8 @@ class swapsModal(discord.ui.Modal):
                 cuts_list = self.children[1].value.split('\n')
                 cuts_list = [x.lower().strip() for x in cuts_list]
                 cuts_errors = []
-                access_token = refresh_token()
-                r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                access_token = await refresh_token()
+                r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                 j_deck = r_deck.json()
                 for card in cuts_list:
                     if not card in j_deck['boards']['mainboard'].lower():
@@ -898,8 +924,8 @@ class swapsModal(discord.ui.Modal):
                     sb_cuts_list = [x.lower().strip() for x in sb_cuts_list]
                     sb_cuts_errors = []
                     if not j_deck:
-                        access_token = refresh_token()
-                        r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                        access_token = await refresh_token()
+                        r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                         j_deck = r_deck.json()
                     for card in sb_cuts_list:
                         if not card in j_deck['boards']['sideboard'].lower():
@@ -932,7 +958,7 @@ class swapsModal(discord.ui.Modal):
             await interaction.respond(embed = embed)
             self.logger.info(f'/swaps: {interaction.user}: processed modal reponse')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class swapsOtherModal(discord.ui.Modal):
     def __init__(self, logger, ctx, cur, conn, res, res_pairings, res_players, player, *args, **kwargs) -> None:
@@ -980,6 +1006,7 @@ class swapsOtherModal(discord.ui.Modal):
             cuts_valid = []
             sb_adds_valid = []
             sb_cuts_valid = []
+            j_deck = ''
             if self.children[0].value:
                 adds_list = self.children[0].value.split('\n')
                 adds_list = [x.lower().strip() for x in adds_list]
@@ -995,8 +1022,8 @@ class swapsOtherModal(discord.ui.Modal):
                 cuts_list = self.children[1].value.split('\n')
                 cuts_list = [x.lower().strip() for x in cuts_list]
                 cuts_errors = []
-                access_token = refresh_token()
-                r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                access_token = await refresh_token()
+                r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                 j_deck = r_deck.json()
                 for card in cuts_list:
                     if not card in j_deck['boards']['mainboard'].lower():
@@ -1022,8 +1049,8 @@ class swapsOtherModal(discord.ui.Modal):
                     sb_cuts_list = [x.lower().strip() for x in sb_cuts_list]
                     sb_cuts_errors = []
                     if not j_deck:
-                        access_token = refresh_token()
-                        r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                        access_token = await refresh_token()
+                        r_deck = requests.get(f"https://api2.moxfield.com/v2/decks/{self.res_players[0].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                         j_deck = r_deck.json()
                     for card in sb_cuts_list:
                         if not card in j_deck['boards']['sideboard'].lower():
@@ -1052,7 +1079,7 @@ class swapsOtherModal(discord.ui.Modal):
             await interaction.respond(embed = embed)
             self.logger.info(f'/swaps: {interaction.user}: processed modal reponse')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 class endModal(discord.ui.Modal):
     def __init__(self, logger, *args, **kwargs) -> None:
@@ -1066,6 +1093,7 @@ class endModal(discord.ui.Modal):
             self.logger.info(f'/end: {interaction.user}: received modal response')
             if self.children[0].value.lower() != 'end' or self.children[1].value.lower() != 'end':
                 await interaction.respond('Error: End confirmation failed. Both fields must match "end" (without quotes).', ephemeral = True)
+                self.logger.info(f'/end: {interaction.user}: modal confirmation failed')
                 return
             await interaction.response.defer()
             #update points
@@ -1074,10 +1102,13 @@ class endModal(discord.ui.Modal):
             res_players = cur.execute('SELECT p_id, m_wins, m_losses, m_draws, g_wins, g_losses, g_draws, m_points, gwp, omwp, ogwp, played_ids, dropped, name, pronouns, deck_name, deck_link FROM players WHERE t_id = ?', (interaction.channel_id, )).fetchall()
             player_dict = {}
             for player in res_players:
-                player_dict[player[0]] = {'m_wins': player[1], 'm_losses': player[2], 'm_draws': player[3], 'g_wins': player[4], 'g_losses': player[5], 'g_draws': player[6], 'm_points': player[7], 'gwp': player[8], 'omwp': player[9], 'ogwp': player[10], 'played_ids': json.loads(player[11]), 'name': player[12], 'pronouns': player[13], 'deck_name': player[14], 'deck_link': player[15]}
+                played_ids = []
+                if player[11]:
+                    played_ids = json.loads(player[11])
+                player_dict[player[0]] = {'m_wins': player[1], 'm_losses': player[2], 'm_draws': player[3], 'g_wins': player[4], 'g_losses': player[5], 'g_draws': player[6], 'm_points': player[7], 'gwp': player[8], 'omwp': player[9], 'ogwp': player[10], 'played_ids': played_ids, 'name': player[12], 'pronouns': player[13], 'deck_name': player[14], 'deck_link': player[15]}
             for player in res_pairings:
                 #if the player hasn't reported, skip
-                if not player[1]:
+                if player[1] is None:
                     continue
                 #update player_dict entry and players table
                 if player[1] > player[2]:
@@ -1126,9 +1157,9 @@ class endModal(discord.ui.Modal):
                 title = f'{res[2]}'
             name = f'Final Standings'
             await interaction.respond(f'<@{interaction.user.id}> ended the tournament!', embeds = embed_generator(title, name, output, '\n'))
-            logger.info(f'/standings: {interaction.user}: completed')
+            self.logger.info(f'/end: {interaction.user}: processed modal response')
         except Exception as e:
-            self.logger.exception(e)
+            await log_exception(e)
 
 #player commands
 @bot.command(description = 'Player dashboard')
@@ -1136,17 +1167,20 @@ async def player(ctx: discord.ApplicationContext):
     try:
         logger.info(f'Recieved player command from {ctx.user}')
         await ctx.defer(ephemeral = True)
-        player_view = playerView()
-        res = cur.execute('SELECT open, round, swaps FROM ongoing_tournaments WHERE id = ?', (ctx.channel_id, )).fetchone()
+        player_view = PlayerView()
+        res = cur.execute('SELECT open, round, swaps, decklist_pub FROM ongoing_tournaments WHERE id = ?', (ctx.channel_id, )).fetchone()
         res_players = cur.execute('SELECT name, pronouns, deck_name, deck_link, m_wins, m_losses, m_draws, dropped FROM players WHERE t_id = ? AND p_id = ?', (ctx.channel_id, ctx.user.id)).fetchone()
         #if no tournament; error message
         if not res:
             await ctx.respond('Error: No ongoing tournament.')
+            logger.info(f'/player: {ctx.user}: no ongoing tournament')
             return
         if res[1]:
             res_pairings = cur.execute('SELECT opponent_id, wins, losses, draws, adds FROM pairings WHERE p_id = ? AND t_id = ? AND round = ?', (ctx.user.id, ctx.channel_id, res[1])).fetchone()
+            res_opponent = cur.execute('SELECT p_id, name, pronouns, deck_name, deck_link FROM players WHERE p_id = ? AND t_id = ?', (res_pairings[0], ctx.channel_id)).fetchone()
         else:
             res_pairings = ()
+            res_opponent = ()
         title = 'Player Dashboard'
         #if tournament and not registered and registration open; send with register, toby, and feedback
         if not res_players and res[0] == 'y':
@@ -1174,6 +1208,7 @@ async def player(ctx: discord.ApplicationContext):
         #if tournament and not open and (not registered or dropped); error message
         elif (not res_players) or (not res_players[7] is None):
             await ctx.respond('Error: Not registered, registration closed.')
+            logger.info(f'/player: {ctx.user}: not registered, registration closed')
             return
         #if tournament and registered and registration open; send with register (change registration), drop, toby, and feedback
         #also send registered name/nickname/pronouns and deckname/hyperlink
@@ -1234,14 +1269,21 @@ async def player(ctx: discord.ApplicationContext):
                 title += f'\nRecord as of round {res[1]} start: {res_players[4]}-{res_players[5]}'
                 if res_players[6]:
                     title += f'-{res_players[6]}'
-            if not res_pairings[2] is None:
+            if res_opponent is None:
+                title += '\nYou have the bye this round!'
+            elif not res_pairings[2] is None:
                 title += f'\nRound {res[1]} report: {res_pairings[1]}-{res_pairings[2]}'
                 if res_pairings[3]:
                     title += f'-{res_pairings[3]}'
-                title += f' vs. <@{res_pairings[0]}>'
+                title += ' vs. ' + name_handler(res_opponent[0], res_opponent[1], res_opponent[2])
+                if res[3] == 'y':
+                    title += f' on [{res_opponent[3]}](<{res_opponent[4]}>)'
                 player_view.report_callback.label = 'Change Match Report'
             else:
-                title += f'\nRound {res[1]} vs. <@{res_pairings[0]}> - not reported'
+                title += f'\nRound {res[1]} vs. ' + name_handler(res_opponent[0], res_opponent[1], res_opponent[2])
+                if res[3] == 'y':
+                    title += f' on [{res_opponent[3]}](<{res_opponent[4]}>)'
+                title += ' - not reported'
             if res[2]:
                 if res_pairings and (not res_pairings[4] is None):
                     title += '\nSwaps recorded (use button or command to view or update)'
@@ -1253,7 +1295,7 @@ async def player(ctx: discord.ApplicationContext):
             player_view.remove_item(player_view.register_callback)
         await ctx.respond(title, view = player_view)
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'Register for tournament')
 async def register(ctx: discord.ApplicationContext):
@@ -1292,10 +1334,7 @@ async def register(ctx: discord.ApplicationContext):
             deck_name = ''
             input_link = ''
         #build modal
-        if res[3]:
-            title = f'Register for {res[3]}'
-        else:
-            title = 'Register for the tournament in this channel'
+        title = 'Register for the tournament in this channel'
         register_modal = registerModal(title = title, logger = logger, ctx = ctx, res_players = res_players, cur = cur, conn = conn)
         register_modal.children[0].value = name
         register_modal.children[1].value = pronouns
@@ -1308,7 +1347,7 @@ async def register(ctx: discord.ApplicationContext):
         #this is to delay dashboard update until modal is submitted
         await register_modal.wait()
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught error'
 
 @bot.command(description = 'Drop from tournament')
@@ -1336,16 +1375,13 @@ async def drop(ctx: discord.ApplicationContext):
             await ctx.respond(header + "Error: You've already dropped.", ephemeral = True)
             logger.info(f'/drop: {ctx.user}: already dropped')
             return 'already dropped'
-        if res[0]:
-            title = f'Drop from {res[0]}'
-        else:
-            title = 'Drop from the tournament in this channel'
+        title = 'Drop from the tournament in this channel'
         drop_modal = dropModal(title = title, logger = logger, ctx = ctx, res = res, cur = cur, conn = conn)
         await send_modal(drop_modal)
         logger.info(f'/drop: {ctx.user}: sent modal')
         await drop_modal.wait()
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught error'
 
 @bot.command(description = 'Report match record for the round')
@@ -1379,7 +1415,7 @@ async def report(ctx: discord.ApplicationContext):
         logger.info(f'/report: {ctx.user}: sent modal')
         await report_modal.wait()
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught exception'
 
 @bot.command(description = 'Submit swaps for the round')
@@ -1415,7 +1451,7 @@ async def swaps(ctx:discord.ApplicationContext):
         logger.info(f'/swaps: {ctx.user}: sent modal')
         await swaps_modal.wait()
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught exception'
 
 #pairing is a player command but intentionally not included as a button on the player dashboard
@@ -1443,7 +1479,7 @@ async def pairing(ctx: discord.ApplicationContext):
             await ctx.respond(f'Round {res[0]} pairing:\n<@{ctx.user.id}> vs <@{res_pairings[0]}>')
         logger.info(f'/pairing: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #shared player and to commands
 @bot.command(description = 'Send TOB(y) feedback!')
@@ -1459,7 +1495,7 @@ async def feedback(ctx: discord.ApplicationContext):
         await send_modal(feedback_modal)
         logger.info(f'/feedback: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'About TOB(y)')
 async def toby(ctx:discord.ApplicationContext):
@@ -1468,7 +1504,7 @@ async def toby(ctx:discord.ApplicationContext):
         await ctx.respond("Hi! I'm TOB(y), the Tournament Organizer Bot (boy). I was made to reduce TO overhead by managing registration, pairing, reporting, and other administrative functions for Magic: the Gathering tournaments hosted on Discord.\n\nYou can add me to your server with [this link](<https://discord.com/oauth2/authorize?client_id=1253129653250424873&permissions=2147485696&integration_type=0&scope=applications.commands+bot>).\n\nGet more information on usage and view source code on [GitHub](<https://github.com/manageorge/TOB-y->).\n\nView my privacy statement [here](<https://github.com/manageorge/TOB-y-/blob/main/privacy.md>).", ephemeral = True)
         logger.info(f'/toby: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'Report current standings for the tournament')
 @option(name = 'public', description = 'Show standings to everyone? [y/N]', required = False, max_length = 1)
@@ -1505,7 +1541,7 @@ async def standings(ctx: discord.ApplicationContext, public: str):
         await ctx.respond(header, embeds = embed_generator(title, name, output, '\n'), ephemeral = eph)
         logger.info(f'/standings: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #round_status is a shared player/to command but intentionally only included on the TO dashboard
 @bot.command(description = "Check the current round's status")
@@ -1563,16 +1599,17 @@ async def round_status(ctx: discord.ApplicationContext):
         await ctx.respond(header, embeds = embed_generator(title, name, output, '\n'), ephemeral = True)
         logger.info(f'/round_status: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #to commands
 @bot.command(description = '(TO) TO dashboard')
 async def to(ctx: discord.ApplicationContext):
     try:
-        logger.info(f'Recieved to command from {ctx.user}')
+        logger.info(f'Recieved TO command from {ctx.user}')
         await ctx.defer(ephemeral = True)
         if not to_check(ctx.user):
             await ctx.respond('Error: TO commands can only be called by users with a TO role.')
+            logger.info(f'/to: {ctx.user}: insufficient permissions')
             return
         to_view = TOView()
         #control which buttons are sent
@@ -1618,8 +1655,9 @@ async def to(ctx: discord.ApplicationContext):
             to_view.remove_item(to_view.close_callback)
             to_view.remove_item(to_view.reopen_callback)
         await ctx.respond('TO Dashboard', view = to_view)
+        logger.info(f'/to: {ctx.user}: send dashboard')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Starts a tournament in this channel')
 async def open(ctx: discord.ApplicationContext):
@@ -1652,7 +1690,7 @@ async def open(ctx: discord.ApplicationContext):
         logger.info(f'/open: {ctx.user}: sent modal')
         await open_modal.wait()
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught error'
 
 @bot.command(description = '(TO) Closes tournament registration')
@@ -1665,7 +1703,7 @@ async def close(ctx: discord.ApplicationContext):
             defer = ctx.response.defer
         else:
             header = ''
-            defer ctx.defer
+            defer = ctx.defer
         #check if calling user is TO
         if not to_check(ctx.user):
             await ctx.respond(header + 'Error: TO commands can only be called by users with a TO role.', ephemeral = True)
@@ -1691,27 +1729,27 @@ async def close(ctx: discord.ApplicationContext):
         msg = await ctx.respond(f'{header}<@{ctx.user.id}> closed registration{name_placeholder}.')
         if res[2]:
             res_players = cur.execute('SELECT deck_id FROM players WHERE t_id = ?', (ctx.channel_id, ))
-            access_token = refresh_token()
+            access_token = await refresh_token()
             if not access_token:
                 logger.error(f'/close: {ctx.user}: failed to get access_token from refresh_token, exited early')
                 #returning nothing here b/c want dashboard to ignore this error
                 return
             #loop through deck_ids, making author request and allow author edit calls
-            for deck in res_players:
-                r = requests.post(f'https://api2.moxfield.com/v2/decks/{res_players[deck]}/authors/{res[2]}/request', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+            for deck_id in res_players[0]:
+                r = requests.post(f'https://api2.moxfield.com/v2/decks/{deck_id}/authors/{res[2]}/request', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                 #log errors
                 if not r.ok:
-                    logger.error(f'/close: {ctx.user}: POST request to https://api2.moxfield.com/v2/decks/{res_players[deck]}/authors/{res[2]}/request failed with status code {r.status_code}')
+                    logger.error(f'/close: {ctx.user}: POST request to https://api2.moxfield.com/v2/decks/{deck_id}/authors/{res[2]}/request failed with status code {r.status_code}')
                 #sleep to play nice with moxfield api
-                await asynchio.sleep(0.05)
-                r = requests.post(f'https://api2.moxfield.com/v2/decks/{res_players[deck]}/authors-editing-opt-in', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
+                await asyncio.sleep(0.5)
+                r = requests.post(f'https://api2.moxfield.com/v2/decks/{deck_id}/authors-editing-opt-in', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
                 if not r.ok:
-                    logger.error(f'/close: {ctx.user}: POST request to https://api2.moxfield.com/v2/decks/{res_players[deck]}/authors/{res[2]}/request failed with status code {r.status_code}')
-                time.sleep(0.05)
+                    logger.error(f'/close: {ctx.user}: POST request to https://api2.moxfield.com/v2/decks/{deck_id}/authors/{res[2]}/request failed with status code {r.status_code}')
+                await asyncio.sleep(0.5)
             await msg.edit(msg.content + f' Shared decks with {res[2]} on Moxfield!')
         logger.info(f'/close: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught exception'
 
 @bot.command(description='(TO) Reopen tournament registration')
@@ -1750,7 +1788,7 @@ async def reopen(ctx: discord.ApplicationContext):
         msg = await ctx.respond(f'{header}<@{ctx.user.id}> reopened registration{name_placeholder}.')
         logger.info(f'/reopen: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
         return 'caught exception'
 
 @bot.command(description = '(TO) Set default tournament settings for this channel')
@@ -1789,7 +1827,7 @@ async def setup(ctx: discord.ApplicationContext):
             await ctx.send_modal(setup_modal)
         logger.info(f'/setup: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Set default swap settings for this channel')
 async def setup_swaps(ctx: discord.ApplicationContext):
@@ -1821,7 +1859,7 @@ async def setup_swaps(ctx: discord.ApplicationContext):
             await ctx.send_modal(setup_swaps_modal)
         logger.info(f'/setup_swaps: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Move tournament to another channel')
 @option(name = 'channel', description = 'Channel to migrate to')
@@ -1848,7 +1886,7 @@ async def migrate(ctx: discord.ApplicationContext, channel: discord.SlashCommand
         conn.commit()
         logger.info(f'/migrate: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Drop user from tournament')
 @option(name = 'player', description = 'Player to drop')
@@ -1889,7 +1927,7 @@ async def drop_other(ctx: discord.ApplicationContext, player: discord.SlashComma
         await send_modal(drop_other_modal)
         logger.info(f'/drop_other: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Submit/update swaps for another user')
 @option(name = 'player', description = 'Player to submit/update swaps for')
@@ -1929,7 +1967,7 @@ async def swaps_other(ctx: discord.ApplicationContext, player: discord.SlashComm
         await send_modal(swaps_other_modal)
         logger.info(f'/swaps_other: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Register another user')
 @option(name = 'player', description = 'Player to register')
@@ -1985,7 +2023,7 @@ async def register_other(ctx: discord.ApplicationContext, player: discord.SlashC
         await send_modal(register_other_modal)
         logger.info(f'/register_other: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Report match record for another user')
 @option(name = 'player', description = 'Player to report for')
@@ -2023,7 +2061,7 @@ async def report_other(ctx: discord.ApplicationContext, player: discord.SlashCom
         await send_modal(report_other_modal)
         logger.info(f'/report_other: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) Pair a new round')
 async def pair(ctx: discord.ApplicationContext):
@@ -2089,6 +2127,7 @@ async def pair(ctx: discord.ApplicationContext):
                 for player in check_reports:
                     output += f'<@{player[0]}>\n'
                 await ctx.respond('Cannot pair, the following players have not reported:\n' + output)
+                logger.info(f'/pair: {ctx.user}: missing reports')
                 return
             await defer()
             #update points
@@ -2139,8 +2178,8 @@ async def pair(ctx: discord.ApplicationContext):
                     op_gwp = player_dict[op_id]['g_wins'] / (player_dict[op_id]['g_wins'] + player_dict[op_id]['g_losses'] + player_dict[op_id]['g_draws'])
                     cum_omwp += max(op_mwp, 0.33)
                     cum_ogwp += max(op_gwp, 0.33)
-                omwp = cum_omwp / len(player_dict[player[0]]['played_ids'])
-                ogwp = cum_ogwp / len(player_dict[player[0]]['played_ids'])
+                omwp = cum_omwp / max(len(player_dict[player[0]]['played_ids']), 1)
+                ogwp = cum_ogwp / max(len(player_dict[player[0]]['played_ids']), 1)
                 player_dict[player[0]]['omwp'] = omwp
                 player_dict[player[0]]['ogwp'] = ogwp
                 cur.execute('UPDATE players SET omwp = ?, ogwp = ? WHERE p_id = ? AND t_id = ?', (omwp, ogwp, player[0], ctx.channel_id))
@@ -2190,14 +2229,16 @@ async def pair(ctx: discord.ApplicationContext):
                     to_pair[points].remove(pair[1])
                     #handle assigning byes
                     if pair[0] == 0:
-                        cur.execute('INSERT INTO pairings (t_id, round, p_id, opponent_id) VALUES (?, ?, ?, ?)', (ctx.channel_id, res[0] + 1, pair[1], 0))
-                        cur.execute('UPDATE players SET played_ids = ? WHERE p_id = ? AND t_id = ?', (json.dumps(player_dict[pair[1]]['played_ids'].append(0)), pair[1], ctx.channel_id))
+                        cur.execute('INSERT INTO pairings (t_id, round, p_id, opponent_id, wins, losses, draws) VALUES (?, ?, ?, ?, ?, ?, ?)', (ctx.channel_id, res[0] + 1, pair[1], 0, 2, 0, 0))
+                        player_dict[pair[1]]['played_ids'].append(pair[0])
+                        cur.execute('UPDATE players SET played_ids = ? WHERE p_id = ? AND t_id = ?', (json.dumps(player_dict[pair[1]]['played_ids']), pair[1], ctx.channel_id))
                         name = name_handler(pair[1], player_dict[pair[1]]['name'], player_dict[pair[1]]['pronouns'])
                         bye_text = f'{name} has the bye this round!'
                         continue
                     if pair[1] == 0:
-                        cur.execute('INSERT INTO pairings (t_id, round, p_id, opponent_id) VALUES (?, ?, ?, ?)', (ctx.channel_id, res[0] + 1, pair[0], 0))
-                        cur.execute('UPDATE players SET played_ids = ? WHERE p_id = ? AND t_id = ?', (json.dumps(player_dict[pair[1]]['played_ids'].append(0)), pair[0], ctx.channel_id))
+                        cur.execute('INSERT INTO pairings (t_id, round, p_id, opponent_id, wins, losses, draws) VALUES (?, ?, ?, ?, ?, ?, ?)', (ctx.channel_id, res[0] + 1, pair[0], 0, 2, 0, 0))
+                        player_dict[pair[0]]['played_ids'].append(pair[1])
+                        cur.execute('UPDATE players SET played_ids = ? WHERE p_id = ? AND t_id = ?', (json.dumps(player_dict[pair[0]]['played_ids']), pair[0], ctx.channel_id))
                         name = name_handler(pair[0], player_dict[pair[0]]['name'], player_dict[pair[0]]['pronouns'])
                         bye_text = f'{name} has the bye this round!'
                         continue
@@ -2216,92 +2257,106 @@ async def pair(ctx: discord.ApplicationContext):
                 #handle pairing down
                 if len(to_pair[points]) > 0:
                     pair_down.extend(to_pair[points])
-            #process swaps
-            if res[5] != 0:
-                for player in res_pairings:
-                    #if they didn't submit swaps, skip
-                    if not (player[4] or player[5] or player[6] or player[7]):
-                        continue
-                    #fetch and process decklist into {'mainboard': {'card': {'quantity': int, 'printing': str}}, 'sideboard': {'card': {'quantity': int, 'printing': str}}}
-                    access_token = refresh_token()
-                    r = requests.get(f"https://api2.moxfield.com/v2/decks/{player_dict[player[0]]['deck_link'].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
-                    if not r.ok:
-                        logger.error(f"Moxfield API bulk-edit GET call failed for {player_dict[player[0]]['deck_link']}")
-                        continue
-                    j = r.json()
-                    decklist = {'mainboard': {}, 'sideboard': {}}
-                    for card in j['boards']['mainboard'].lower().split('\n'):
-                        quantity = card[0:card.find(' ')]
-                        name = card[card.find(' ') + 1:card.find('(') - 1]
-                        printing_info = card[card.find('('):]
-                        decklist['mainboard'][name] = {'quantity': int(quantity), 'printing': printing_info}
-                    for card in j['boards']['sideboard'].lower().split('\n'):
-                        quantity = card[0:card.find(' ')]
-                        name = card[card.find(' ') + 1:card.find('(') - 1]
-                        printing_info = card[card.find('('):]
-                        decklist['sideboard'][name] = {'quantity': int(quantity), 'printing': printing_info}
-                    #add adds to decklist mainboard dict
-                    adds = []
-                    if player[4]:
-                        adds = json.loads(player[4])
-                    for add in adds:
-                        if not add in decklist['mainboard'].keys():
-                            decklist['mainboard'][add] = {'quantity': 1, 'printing': ''}
-                        else:
-                            decklist['mainboard'][add]['quantity'] += 1
-                    #remove cuts from decklist mainboard dict
-                    cuts = []
-                    if player[5]:
-                        cuts = json.loads(player[5])
-                        cuts = [x.lower() for x in cuts]
-                    for cut in cuts:
-                        if cut in decklist['mainboard'].keys():
-                            if decklist['mainboard'][cut]['quantity'] > 1:
-                                decklist['mainboard'][cut]['quantity'] -= 1
-                            else:
-                                del decklist['mainboard'][cut]
-                    #add sb_adds to decklist sideboard dict
-                    sb_adds = []
-                    if player[6]:
-                        sb_adds = json.loads(player[6])
-                    for add in sb_adds:
-                        if not add in decklist['sideboard'].keys():
-                            decklist['sideboard'][add] = {'quantity': 1, 'printing': ''}
-                        else:
-                            decklist['sideboard'][add]['quantity'] += 1
-                    #remove sb_cuts from decklist sideboard dict
-                    sb_cuts = []
-                    if player[5]:
-                        sb_cuts = json.loads(player[7])
-                        sb_cuts = [x.lower() for x in sb_cuts]
-                    for cut in sb_cuts:
-                        if cut in decklist['sideboard'].keys():
-                            if decklist['sideboard'][cut]['quantity'] > 1:
-                                decklist['sideboard'][cut]['quantity'] -= 1
-                            else:
-                                del decklist['sideboard'][cut]
-                    #make api call to update decklist
-                    mainboard = ''
-                    for card in decklist['mainboard']:
-                        mainboard += f"{decklist['mainboard'][card]['quantity']} {card} {decklist['mainboard'][card]['printing']}\n"
-                    sideboard = ''
-                    for card in decklist['sideboard']:
-                        sideboard += f"{decklist['sideboard'][card]['quantity']} {card} {decklist['sideboard'][card]['printing']}\n"
-                    outdeck = {'attractions':"", 'companions':"", 'contraptions':"", 'mainboard':mainboard, 'maybeboard':"", 'planes':"", 'schemes':"", 'sideboard':sideboard, 'stickers':"", 'tokens':""}
-                    outjson = {'boards': outdeck, 'playStyle': "paperDollars", 'pricingProvider': "tcgplayer", 'usePrefPrintings': True}
-                    r = requests.put(f"https://api2.moxfield.com/v3/decks/{player_dict[player[0]]['deck_link'].replace('https://www.moxfield.com/decks/', '')}/bulk-edit", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}, json = outjson)
-                    if not r.ok:
-                        logger.error(f"Moxfield API bulk-edit GET call failed for {player_dict[player[0]]['deck_link']}")
+            output += bye_text
         title = f'{ctx.channel.name} Tournament'
         if res[2]:
             title = f'{res[2]}'
         name = f'Round {res[0] + 1} pairings'
         cur.execute('UPDATE ongoing_tournaments SET round = ? WHERE id = ?', (res[0] + 1, ctx.channel_id))
         conn.commit()
-        await ctx.respond(embeds = embed_generator(title, name, output, '\n'))
+        msg = await ctx.respond(embeds = embed_generator(title, name, output, '\n'))
+        #handle swaps if previous round wasn't the first (> 0) and swaps allowed (> 0)
+        if res[0] != 0 and res[5] != 0:
+            progress = 0
+            total = len(res_pairings)
+            await msg.edit(f'Making swaps, {progress}/{total} players complete!')
+            for player in res_pairings:
+                #if they didn't submit swaps, skip
+                if not (player[4] or player[5] or player[6] or player[7]):
+                    progress += 1
+                    continue
+                #fetch and process decklist into {'mainboard': {'card': {'quantity': int, 'printing': str}}, 'sideboard': {'card': {'quantity': int, 'printing': str}}}
+                access_token = await refresh_token()
+                r = requests.get(f"https://api2.moxfield.com/v2/decks/{player_dict[player[0]]['deck_link'].replace('https://www.moxfield.com/decks/', '')}/bulk-edit?allowMultiplePrintings=false", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent})
+                await asyncio.sleep(0.5)
+                if not r.ok:
+                    logger.error(f"Moxfield API bulk-edit GET call failed for {player_dict[player[0]]['deck_link']}")
+                    progress += 1
+                    await msg.edit(f'Making swaps, {progress}/{total} players complete!')
+                    continue
+                j = r.json()
+                decklist = {'mainboard': {}, 'sideboard': {}}
+                for card in j['boards']['mainboard'].lower().split('\n'):
+                    quantity = card[0:card.find(' ')]
+                    name = card[card.find(' ') + 1:card.find('(') - 1]
+                    printing_info = card[card.find('('):]
+                    decklist['mainboard'][name] = {'quantity': int(quantity), 'printing': printing_info}
+                for card in j['boards']['sideboard'].lower().split('\n'):
+                    if not card:
+                        continue
+                    quantity = card[0:card.find(' ')]
+                    name = card[card.find(' ') + 1:card.find('(') - 1]
+                    printing_info = card[card.find('('):]
+                    decklist['sideboard'][name] = {'quantity': int(quantity), 'printing': printing_info}
+                #add adds to decklist mainboard dict
+                adds = []
+                if player[4]:
+                    adds = json.loads(player[4])
+                for add in adds:
+                    if not add in decklist['mainboard'].keys():
+                        decklist['mainboard'][add] = {'quantity': 1, 'printing': ''}
+                    else:
+                        decklist['mainboard'][add]['quantity'] += 1
+                #remove cuts from decklist mainboard dict
+                cuts = []
+                if player[5]:
+                    cuts = json.loads(player[5])
+                    cuts = [x.lower().replace('//', '/') for x in cuts]
+                for cut in cuts:
+                    if cut in decklist['mainboard'].keys():
+                        if decklist['mainboard'][cut]['quantity'] > 1:
+                            decklist['mainboard'][cut]['quantity'] -= 1
+                        else:
+                            del decklist['mainboard'][cut]
+                #add sb_adds to decklist sideboard dict
+                sb_adds = []
+                if player[6]:
+                    sb_adds = json.loads(player[6])
+                for add in sb_adds:
+                    if not add in decklist['sideboard'].keys():
+                        decklist['sideboard'][add] = {'quantity': 1, 'printing': ''}
+                    else:
+                        decklist['sideboard'][add]['quantity'] += 1
+                #remove sb_cuts from decklist sideboard dict
+                sb_cuts = []
+                if player[5]:
+                    sb_cuts = json.loads(player[7])
+                    sb_cuts = [x.lower().replace('//', '/') for x in sb_cuts]
+                for cut in sb_cuts:
+                    if cut in decklist['sideboard'].keys():
+                        if decklist['sideboard'][cut]['quantity'] > 1:
+                            decklist['sideboard'][cut]['quantity'] -= 1
+                        else:
+                            del decklist['sideboard'][cut]
+                #make api call to update decklist
+                mainboard = ''
+                for card in decklist['mainboard']:
+                    mainboard += f"{decklist['mainboard'][card]['quantity']} {card} {decklist['mainboard'][card]['printing']}\n"
+                sideboard = ''
+                for card in decklist['sideboard']:
+                    sideboard += f"{decklist['sideboard'][card]['quantity']} {card} {decklist['sideboard'][card]['printing']}\n"
+                outdeck = {'attractions':"", 'companions':"", 'contraptions':"", 'mainboard':mainboard, 'maybeboard':"", 'planes':"", 'schemes':"", 'sideboard':sideboard, 'stickers':"", 'tokens':""}
+                outjson = {'boards': outdeck, 'playStyle': "paperDollars", 'pricingProvider': "tcgplayer", 'usePrefPrintings': True}
+                r = requests.put(f"https://api2.moxfield.com/v3/decks/{player_dict[player[0]]['deck_link'].replace('https://www.moxfield.com/decks/', '')}/bulk-edit", headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent}, json = outjson)
+                await asyncio.sleep(0.5)
+                if not r.ok:
+                    logger.error(f"Moxfield API bulk-edit GET call failed for {player_dict[player[0]]['deck_link']}")
+                progress += 1
+                await msg.edit(f'Making swaps, {progress}/{total} players complete!')
+            await msg.edit(f'Making swaps, {progress}/{total} players complete!')
         logger.info(f'/pair: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '(TO) End the tournament')
 async def end(ctx: discord.ApplicationContext):
@@ -2326,14 +2381,16 @@ async def end(ctx: discord.ApplicationContext):
             return
         res_pairings = cur.execute('SELECT p_id FROM pairings WHERE t_id = ? AND round = ? AND wins IS NULL', (ctx.channel_id, res[0])).fetchall()
         if res_pairings:
-            await ctx.respond(header + 'Some players have not reported for the round:', view = endConfirmView(), ephemeral = True)
+            await ctx.respond(header + 'Some players have not reported for the round:', view = EndConfirmView(), ephemeral = True)
+            logger.info(f'/end: {ctx.user}: sent confirm view')
             return
         await send_modal(endModal(logger = logger, title = 'End tournament?'))
+        logger.info(f'/end: {ctx.user}: sent modal')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #testing commands
-@bot.command(description = 'Autofills open tournament to input number of players (default 16)', guild_ids = [os.getenv('MBTS'), os.getenv('TBYTS')])
+@bot.command(description = 'Autofills open tournament to input number of players (default 16)', guild_ids = test_channels)
 @option(name = 'players', description = 'Number of players', required = False)
 async def autofill(ctx: discord.ApplicationContext, players: int):
     try:
@@ -2364,9 +2421,9 @@ async def autofill(ctx: discord.ApplicationContext, players: int):
         await ctx.respond(header + f'Added {players - len(res_players)} players!')
         logger.info(f'autofill: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
-@bot.command(description = "Matches opponent's report or randomly reports for all unreported players", guild_ids = [os.getenv('MBTS'), os.getenv('TBYTS')])
+@bot.command(description = "Matches opponent's report or randomly reports for all unreported players", guild_ids = test_channels)
 async def autoreport(ctx: discord.ApplicationContext):
     try:
         logger.info(f'Received autoreport command from {ctx.user}')
@@ -2381,9 +2438,11 @@ async def autoreport(ctx: discord.ApplicationContext):
         res = cur.execute('SELECT round FROM ongoing_tournaments WHERE id = ?', (ctx.channel_id, )).fetchone()
         if not res:
             await ctx.respond(header + 'Error: No ongoing tournament')
+            logger.info(f'/autoreport: {ctx.user}: no ongoing')
             return
         if not res[0]:
             await ctx.respond(header + 'Error: Rounds have not started')
+            logger.info(f'/autoreport: {ctx.user}: rounds not started')
             return
         #grab list of players/pairings from pairings
         res_pairings = cur.execute('SELECT p_id, opponent_id, wins, losses, draws FROM pairings WHERE t_id = ? AND round = ? AND wins IS NULL', (ctx.channel_id, res[0])).fetchall()
@@ -2427,7 +2486,7 @@ async def autoreport(ctx: discord.ApplicationContext):
         await ctx.respond(embeds = embed_generator('Autofill', 'Added reports:', output, '\n'))
         logger.info(f'/autoreport: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #admin commands
 @bot.command(description = 'Admin dashboard', guild_ids = [os.getenv('MBTS')])
@@ -2435,10 +2494,10 @@ async def admin(ctx: discord.ApplicationContext):
     try:
         logger.info(f'Recieved admin command from {ctx.user}')
         await ctx.defer(ephemeral = True)
-        await ctx.respond('Admin commands:', view = adminView())
+        await ctx.respond('Admin commands:', view = AdminView())
         logger.info(f'/admin: {ctx.user}: dashboard sent')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'General testing (changes often)', guild_ids = [os.getenv('MBTS')])
 async def testing(ctx: discord.ApplicationContext):
@@ -2449,15 +2508,11 @@ async def testing(ctx: discord.ApplicationContext):
         else:
             await ctx.response.defer()
         #time.sleep(2)
-        embed=discord.Embed(title="**Round Pairings**")
-        embed.add_field(name="Round 3", value=f"George (He/They) on [Testing](<https://github.com/Pycord-Development/pycord/tree/c430fbb4ef97454ac78248af3c776ac1bc09bcf4>) vs George (He/They) on [Testing](<https://github.com/Pycord-Development/pycord/tree/c430fbb4ef97454ac78248af3c776ac1bc09bcf4>)\n\ntesting\n\n<@{ctx.user.id}>", inline=False)
-        embed_two=discord.Embed(title="**Round Pairings**")
-        embed_two.add_field(name="Round 4!", value=f"George (He/They) on [Testing](<https://github.com/Pycord-Development/pycord/tree/c430fbb4ef97454ac78248af3c776ac1bc09bcf4>) vs George (He/They) on [Testing](<https://github.com/Pycord-Development/pycord/tree/c430fbb4ef97454ac78248af3c776ac1bc09bcf4>)\n\ntesting\n\n<@{ctx.user.id}>", inline=False)
-        msg = await ctx.respond(embeds = [embed, embed_two], ephemeral = True)
+        raise Exception('Testing Exceptions')
         #await msg.edit(msg.content + '(edited)')
         logger.info(f'/testing: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'Update token', guild_ids = [os.getenv('MBTS')])
 async def update_token(ctx: discord.ApplicationContext):
@@ -2469,14 +2524,14 @@ async def update_token(ctx: discord.ApplicationContext):
             header = ''
             await ctx.defer()
         logger.info(f'Received token_update command from {ctx.user}')
-        neg_fail_check = refresh_token()
+        neg_fail_check = await refresh_token()
         if neg_fail_check:
             await ctx.respond(header + 'Token refresh successful!')
         else:
             await ctx.respond(header + 'Token refresh failed')
         logger.info(f'/token_update: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = 'Database setup', guild_ids = [os.getenv('MBTS')])
 async def db_setup(ctx: discord.ApplicationContext):
@@ -2492,7 +2547,7 @@ async def db_setup(ctx: discord.ApplicationContext):
         await ctx.respond(header + 'Database established!')
         logger.info(f'/db_setup: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 @bot.command(description = '**DANGER** Run unfiltered SQL commands', guild_ids = [os.getenv('MBTS')])
 @option(name = 'sql', description = '**DANGER** SQL statement to run')
@@ -2530,7 +2585,7 @@ async def db_query(ctx: discord.ApplicationContext, sql: str):
             await ctx.respond(embed = embed)
         logger.info(f'/db_query: {ctx.user}: completed')
     except Exception as e:
-        logger.exception(e)
+        await log_exception(e)
 
 #utility functions
 def to_check(user):
@@ -2539,16 +2594,16 @@ def to_check(user):
             return True
     return False
 
-def refresh_token():
+async def refresh_token():
     try:
         res = cur.execute('SELECT refresh_token FROM tokens').fetchone()
         if not res:
             logger.error('refresh_token failed: no refresh token in db')
             return
-        ##change isAppLogin to true once that is meaningful
-        r = requests.post('https://api2.moxfield.com/v1/account/token/refresh', headers = {'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}, json = {"refreshToken":res[0], "isAppLogin":False})
+        r = requests.post('https://api2.moxfield.com/v1/account/token/refresh', headers = {'Content-Type':'application/json','user-agent':user_agent}, json = {"refreshToken":res[0], "isAppLogin":True})
         if not r.ok:
             logger.error(f'refresh_token failed: GET request to https://api2.moxfield.com/v1/account/token/refresh failed with status code {r.status_code}')
+            await log_channel.send(embeds = embed_generator('Error Updating Token', 'Error', r.text, '\n'))
             return
         j = r.json()
         cur.execute('UPDATE tokens SET refresh_token = ?, access_token = ?', (j['refresh_token'], j['access_token']))
@@ -2560,19 +2615,18 @@ def refresh_token():
 
 def duplicate(pub_deck_id, deck_name):
     try:
-        access_token = refresh_token()
+        access_token = await refresh_token()
         if not access_token:
             logger.error('duplicate failed: failed to get access_token from refresh_token, exited early')
             return
-        r = requests.post(f'https://api2.moxfield.com/v2/decks/{pub_deck_id}/clone', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}, json = {"name":deck_name,"includePrimer":False,"includeTags":False})
+        r = requests.post(f'https://api2.moxfield.com/v2/decks/{pub_deck_id}/clone', headers = {'Authorization':f'Bearer {access_token}', 'Content-Type':'application/json','user-agent':user_agent}, json = {"name":deck_name,"includePrimer":False,"includeTags":False})
         if not r.ok:
             logger.error(f'duplicate failed: POST request to https://api2.moxfield.com/v2/decks/{pub_deck_id}/clone failed with status code {r.status_code}')
             return
         j = r.json()
-        return f"https://www.moxfield.com/decks/{j['publicId']}"
+        return (f"https://www.moxfield.com/decks/{j['publicId']}", j['id'])
     except Exception as e:
         logger.exception(e)
-        return
 
 def create_db():
     cur.execute('CREATE TABLE IF NOT EXISTS ongoing_tournaments (id INTEGER PRIMARY KEY, open TEXT DEFAULT "y", round INTEGER DEFAULT 0, decklist_req TEXT DEFAULT "n", decklist_pub TEXT DEFAULT "n", elim_style TEXT DEFAULT "swiss", t_format TEXT DEFAULT "unknown", swaps INTEGER DEFAULT 0, swaps_pub TEXT DEFAULT "n", swaps_balanced TEXT DEFAULT "y", sb_swaps TEXT DEFAULT "y", t_name TEXT, to_moxfield TEXT, deckname_req TEXT DEFAULT "y")')
@@ -2615,7 +2669,7 @@ def standings_text(channel_id, decklist_req, decklist_pub, round_num):
             output += f'<@{res[i][1]}>'
         if decklist_req == 'y' and decklist_pub == 'y':
             output += f' on [{res[i][2]}](<{res[i][3]}>)'
-        if not {res[i][13]}:
+        if not res[i][13]:
             output += f' ({res[i][11]}-{res[i][12]})'
         else:
             output += f' ({res[i][11]}-{res[i][12]}-{res[i][13]})'
@@ -2694,9 +2748,17 @@ def embed_generator(title, header, text, seperator):
     embed.add_field(name = header, value = "This content was too long to display (~59,000 character limit, I'm surprised you hit that)")
     return [embed]
 
+async def log_exception(e):
+    try:
+        logger.exception(e)
+        log_channel = bot.get_channel(int(log_channel_id))
+        await log_channel.send(embeds = embed_generator('TOB(y) Error', 'Traceback', ''.join(traceback.format_exception(e)), '\n'))
+    except Exception as e1:
+        logger.exception(e1)
+
 @tasks.loop(hours = 24)
 async def token_keep_alive():
-    refresh_token()
+    await refresh_token()
 
 #main commands/bot runner
 async def main():
@@ -2706,7 +2768,7 @@ async def main():
         #any tasks must be started before starting the bot
         token_keep_alive.start()
         #run the bot with the token
-        await bot.start(os.getenv('TOKEN')) 
+        await bot.start(bot_token) 
     except Exception as e:
         logger.exception(e)
     finally:
